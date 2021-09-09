@@ -2,6 +2,11 @@
 """
 Illustration of fit routine used for the evaluation of my measurement data.
 @author: mhart
+
+ACB: the csv files to be read by this script can be generated from the RMT
+TA_spect_len_0001_z files using the makedf.py utility. The csv files should then
+be named int1.3.csv (for intensity 1.3) and all stored in the same directory.
+This script can then be run in that directory to do the fitting.
 """
 
 #-----------------------------------------------------------------------
@@ -10,20 +15,41 @@ Illustration of fit routine used for the evaluation of my measurement data.
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy.constants import physical_constants as constants
+import pandas as pd
+import sys
+import matplotlib.pyplot as plt
+
+
 
 #-----------------------------------------------------------------------
 #                   Pseudo Code
 #-----------------------------------------------------------------------
 def get_energy_axis():
+    your_energy_axis = np.linspace(51.012496,67.000271,1962)
     return your_energy_axis
 
 def getOD(intensity):
     """ Returns a whole time delay scan at a given intensity.
         Shape (td_axis_size, energy_axis_size). """
-    return OD_time_delay_scan
+    fname = "int"+str(intensity)+".csv"
+    df = pd.read_csv(fname)
+    time_delay_axis = np.array([float(x) for x in df.columns])
+    return df.transpose().values, time_delay_axis
 
 def get_intensities():
-    return []
+    return [1.3,1.6,1.9,2.2,2.5]
+
+def get_roi(energy_axis,erange=(55.15,57.45)):
+    for i,e in enumerate(energy_axis): 
+        if e>erange[0]:
+            first = i
+            break
+    for i,e in enumerate(energy_axis): 
+        if e>erange[1]:
+            last = i
+            break
+
+    return (first,last)
 #-----------------------------------------------------------------------
 #                   Constants
 #-----------------------------------------------------------------------
@@ -35,11 +61,12 @@ gamma_xe1 = 0.122 # from literature (Anderson 2001 I think?)
 
 # resonance energies after calibration
 # (retrieved by fitting a Lorentzian to the spectra far out of temporal overlap)
-e_res = [55.39272852, 56.06758587, 57.37720201]
+e_res = [55.38, 55.98, 57.27]
 
 # set region of interest for fit
-roi = slice(560,700)
+roi = slice(*get_roi(get_energy_axis()))
 photonenergy = get_energy_axis()[roi]
+#print (photonenergy)
 
 # list of your intensity values
 intensities = get_intensities()
@@ -69,7 +96,7 @@ def DCM_lineshape(energy_axis, z, phi, resonance_energy, gamma):
         line shape function as a function of photon energy
     """
     lineshape = (gamma/2*np.cos(phi) - (energy_axis-resonance_energy)*np.sin(phi)) / ((energy_axis-resonance_energy)**2 + gamma**2/4)
-    return z * lineshape
+    return  z * lineshape
 
 def fit_lineshapes(energy_axis, *params):
     """
@@ -111,25 +138,27 @@ p_initial = [1, 0, gamma_xe1]*3 + [0]
 # initial_model = fit_lineshapes(photonenergy, *p_initial)
 optimum = []
 fit_errs = []
+td = []
 
 #-----------------------------------------------------------------------
 #                   Fit loop
 #-----------------------------------------------------------------------
 
+df=pd.DataFrame()
+
 for i,intensity in enumerate(intensities):
     """ Outer loop over all intensities """
     
-    OD = getOD[intensity]
+    OD,time_delay_axis = getOD(intensity)
     # my data is ordered from late TDs to early TDs. To initialize the fit
     # I first average over e.g. the region from 6 to 8 fs and extract robust 
     # start values for the inner loop that fits all time-delay spectra sequentially.
     # time_delay_axis[0]=8
     # time_delay_axis[n_late_td]=6
-    freq_marginal = np.mean(OD[:n_late_td], axis=0)
+    freq_marginal = np.mean(OD[:7], axis=0)
     
     p_init, pcov = curve_fit(fit_lineshapes, photonenergy, freq_marginal[roi],
                              p_initial)
-    
     params = []
     errors = []
     
@@ -160,9 +189,25 @@ for i,intensity in enumerate(intensities):
     optimum.append(params)
     fit_errs.append(errors)
 
+
 # fit results
 # shape (len(intensities), time_delay_size, N_params)
 opt_params = np.array(optimum)
 err_params = np.array(fit_errs)
+df["time"] = time_delay_axis[::-1]
+for ii,intens in enumerate(intensities):
+    for num in range(3):
+#    plt.plot(time_delay_axis[::-1],opt_params[ii,::-1,1],label=str(intens))
+        z0="T"+str(num+1)+"_z0"+str(intens)
+        phi="T"+str(num+1)+"_phi"+str(intens)
+        gam="T"+str(num+1)+"_gam"+str(intens)
+        df[z0] = opt_params[ii,::-1,3*num]
+        df[phi] = opt_params[ii,::-1,3*num+1]
+        df[gam] = opt_params[ii,::-1,3*num+2]
+
+df.to_csv("op.csv",index=False)
+
+#plt.legend()
+#plt.show()
 
 
