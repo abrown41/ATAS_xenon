@@ -11,7 +11,7 @@ def read_command_line():
 
 
 df = pd.read_csv("op.csv")
-intensities = [1.3,1.6,1.9,2.2,2.5]
+intensities = [2.2]#[1.3,1.6,1.9,2.2,2.5]
 
 args= read_command_line()
 ikey=args["param"]
