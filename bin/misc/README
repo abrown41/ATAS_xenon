@@ -1,0 +1,8 @@
+This directory contains random scripts I have accumulated along the way.
+
+gaussfield.py		
+gaussian_pulse.py	
+	Scripts for generating gaussian profile laser pulse for input to RMT.
+
+lineshapes_signal.py
+	Script for revers FT the OD lineshapes to obtain the signal.

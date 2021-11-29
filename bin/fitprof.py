@@ -1,4 +1,6 @@
 """
+Original Script for fitting
+
 This script extracts the time-dependent oscillations in the absorption peaks and
 fits them with a fano/lorentzian profile so that the phase, amplitude and
 linewidth can be extracted. Run with python fitprof.py <list of rmt directories>
