@@ -1,13 +1,12 @@
 The bin directory houses the analysis scripts used to extract ATAS from the raw
-RMT files. This does not include the gen_tas.py script which is already part of
-the rmt repo. The archer_files directory contains a utility for setting up
-calculations, and the necessary input.conf file to make that work. It will need
-editing to work on your archer account. 
+RMT files. The archer_files directory contains a utility for setting up
+calculations, a utility for generating the gaussian profile pulses, and the 
+necessary input.conf file to make that work. It will need editing to work on your
+archer account. Also in the archer_files are utilities for extracting the ground
+state population at the end of the calculation for each IR intensity (a single 
+time delay is chosen because the population agrees to \~6s.f. across the time 
+delays) and the final pop_all which can be used to estimate the error in the
+calculation.
 
-The data which has already been generated amounts to >10Gb so I haven't put it
-here. Instead, I've created an archive on
-/work/e585/e585/shared/xenon_data_for_lynda.tar which you can pull in. 
-
-There's a separate .tar file (incase you already started to extract the first
-one) with the H, D* and Spline* files from R-matrix I. That's on 
-/work/e585/e585/shared/xenon_input_for_lynda.tar. 
+The required data (EField and dipole files) are in the data directory. At the moment,
+the analysis scripts need tweaked to work with these files.
