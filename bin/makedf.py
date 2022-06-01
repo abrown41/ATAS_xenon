@@ -1,70 +1,34 @@
 """
-This script reads the TA_spect_len_0001_z files from the individual directories,
-and puts them together into a dataframe, which is output to a csv file. This csv
-file can then be read by the fit_script utility that max sent. 
+This script reads both the expec_z_all.* and EField.Xe* files from the individual directories,
+and puts them together into two dataframes, which are output to csv files: field.csv and dipole.csv.
+These csv files can then be read by the fit_script utility to generate the OD and perform the fitting.
+The directories containing the files from the RMT calculation are to be named delay_+_X.XXX or delay_-_X.XXX 
 """
-import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
-import scipy.optimize as sp
 import glob
-from argparse import ArgumentParser as AP
+import helper_functions as hf
 
-def read_command_line():
-    parser = AP()
-    parser.add_argument('files', nargs="+",help="list of directories containing output for plotting")
+args = hf.read_command_line()
+filelist=args["dirs"]
+filelist= hf.order_files(filelist)
 
-    parser.add_argument('-o','--output', type=str,help="output file for fit parameters, default is output.csv",default="output.csv")
-    return vars(parser.parse_args())
+ndf_dipole = pd.DataFrame()
+ndf_field  = pd.DataFrame()
 
-
-# def strip_num(filename):
-#     import re
-#     pat=re.compile("[0-9]{2}.[0-9]{3}")
-#     m=pat.search(filename)
-#     pat=re.compile("[+,-]")
-#     n=pat.search(filename)
-#     return(float(n.group(0)+m.group(0)))
-
-# def strip_num_IR(filename):
-#     import re
-#     pat=re.compile("[0-9]{1}.[0-9]{1}")
-#     m=pat.search(filename)
-#     return(float(m.group(0)))
-
-def strip_num_OR_dir(filename):
-    import re
-    pat=re.compile("[0-9]{2}.[0-9]{1}")
-    m=pat.search(filename)
-    return(float(m.group(0)))
-
-def order_files(filelist):
-    from operator import itemgetter
-    td_list=[]
-    for fname in filelist:
-        # td_list.append((fname,'+05.00')) 
-        td_list.append((fname,strip_num_OR_dir(fname))) 
-
-    return(sorted(td_list, key=itemgetter(1), reverse=True))
-
-def grabData(fname):
-    df = pd.read_csv(fname, header=None)#, delim_whitespace=True, header=None)
-    print(df)
-    return (df)
-
-args = read_command_line()
-filelist=args["files"]
-filelist= order_files(filelist)
-
-ndf = pd.DataFrame()
 for f,t in filelist:
-    print(f)
-    fname=glob.glob(f+"/OD.csv")[0]
-    df = grabData(fname)
-    ndf[str(t)] = df[1]
+    fname=glob.glob(f+"/expec_z_all.*")[0]
+    df1 = hf.grab_data(fname)
+    ndf_dipole[str(t)] = df1['0001_z']
 
-ndf.insert(0, "Energy", df[0])
-ndf.drop(index=1)
-ndf.to_csv(args["output"]+'.csv',index=False)
+    fname=glob.glob(f+"/EField.Xe*")[0]
+    df2 = hf.grab_data(fname)
+    ndf_field[str(t)] = df2['0001_z']
 
+ndf_dipole.insert(0, "Time", df1['Time'])
+ndf_dipole.drop(index=1)
+ndf_dipole.to_csv('dipole.csv',index=False)
+
+ndf_field.insert(0, "Time", df2['Time'])
+ndf_field.drop(index=1)
+ndf_field.to_csv('field.csv',index=False)
 
