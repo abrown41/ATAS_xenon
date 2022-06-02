@@ -1,6 +1,6 @@
 !! gaussian :: produce gaussian shaped, two colour pulse for read in to RMT
 !! compilation :: gfortran -o gaussian.x gaussian.f90
-!! usage :: ./gaussian.x <delay between pulses in femtoseconds>
+!! usage :: ./gaussian.x <delay between pulses in femtoseconds> <IR intensity in 10^{14} W/cm^2>
 !!
 module precisn
 implicit none
@@ -23,10 +23,11 @@ character(6) :: delayinp, intensityinp
 integer :: ii
 
 delay_in_fs = 1.0_wp
+IR_intensity = 1.0_wp
 
 call get_command_argument(1, delayinp)
 read(delayinp, *) delay_in_fs
-delay_in_au = delay_in_fs * 27.212_wp
+delay_in_au = delay_in_fs * 41.34_wp
 
 call get_command_argument(2, intensityinp)
 read(intensityinp, *) IR_intensity
