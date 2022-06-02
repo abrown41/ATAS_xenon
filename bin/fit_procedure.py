@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-Uses dipole.csv and field.csv (output from makedf.py) to calculate the OD
-at each time delay in a time delay scan, perform the fitting procedure and
-save the time delay scan, the fits at each time delay and the fitting parameters
-to .csv files named OD.csv, OD_fit.csv and fit_params.csv respectively.
+Uses dipoleX.X.csv and fieldX.X.csv (output from makedf.py) to calculate the OD 
+for a single IR intensity at each time delay in a time delay scan, perform 
+the fitting procedure and save the time delay scan, the fits at each time
+delay and the fitting parameters to .csv files named ODX.X.csv, OD_fitX.X.csv 
+and fit_paramsX.X.csv respectively. 'X.X' is the IR intensity.
 
 In calculating the OD, the dipole is tapered with an exponential decay to simulate
 Auger Decay.
+
+Executed from the directory containing the dipole and electric field files by:
+    python fit_procedure.py -i <IR intensity>
+Where the argument -i chooses the IR intensity.
 
 Adapted from a script by Max.
 """
@@ -21,6 +26,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import helper_functions as hf
 
+args = hf.read_command_line()
+intensity=args["IR_intensity"]
 
 #-----------------------------------------------------------------------
 #                   Constants
@@ -46,8 +53,8 @@ errors = []
 #                   Read Data 
 #-----------------------------------------------------------------------
 
-df1 = pd.read_csv("dipole.csv")
-df2 = pd.read_csv("field.csv")
+df1 = pd.read_csv("dipole"+str(intensity)+".csv")
+df2 = pd.read_csv("field"+str(intensity)+".csv")
 
 #-----------------------------------------------------------------------
 #                   Delay loop 
@@ -186,7 +193,7 @@ for col in range(len(OD_sim[:,0])):
     delay = str(td[col])
     OD_df[delay] = OD_sim[col,:]
 
-OD_df.to_csv('OD.csv', index=False)
+OD_df.to_csv('OD'+str(intensity)+'.csv', index=False)
 
 fit_df = pd.DataFrame()
 fit_df['Energy'] = w_roi
@@ -194,16 +201,16 @@ for col in range(len(OD_fit[:,0])):
     delay = str(td[col])
     fit_df[delay] = OD_fit[col,:]
 
-fit_df.to_csv('OD_fit.csv', index=False)
+fit_df.to_csv('OD_fit'+str(intensity)+'.csv', index=False)
 
 #-----------------------------------------------------------------------
 #                   Save Fitting Parameters
 #-----------------------------------------------------------------------
 
 params_df = pd.DataFrame()
-params_df['Time Delays'] = td 
+params_df['Time Delays'] = td
 params_df['Line Strength'] = params[:,0]
 params_df['Phase'] = params[:,1]
 params_df['Line Width'] = params[:,2]
 
-params_df.to_csv('fit_params.csv', index=False)
+params_df.to_csv('fit_params'+str(intensity)+'.csv', index=False)

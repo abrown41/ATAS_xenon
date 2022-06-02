@@ -333,8 +333,8 @@ def fit_lineshapes(energy_axis, *params):
 
 def read_command_line():
     parser = AP()
-    parser.add_argument('dirs', nargs="+",help="list of directories containing the fit_params.csv file for each IR intensity")
     parser.add_argument('-p','--plot', help="show a plot",action='store_true',default=False)
+    parser.add_argument('-i', '--IR_intensity', type=float, help="IR intensity")
     return vars(parser.parse_args())
 
 def moving_average(input_data, window_size):

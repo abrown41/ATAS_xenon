@@ -5,6 +5,9 @@ the dipole phase to obtain the delay-dependent oscillations. From this, the maxi
 oscillation amplitude is obtained for each intensity (neglecting delays <1.75 as in
 experiment).
 
+Executed from the directory containing the fit_params.csv files by:
+    python fit_cycle_average.py [-p]
+
 The optional argument -p plots three figures:
     1. The delay dependent dipole phase after subtracting the cycye-averaged trend
     2. Maximum amplitude of the oscillating phase at each intensity
@@ -16,7 +19,6 @@ The optional argument -p plots three figures:
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from pathlib import Path
 import helper_functions as hf
 
 args=hf.read_command_line()
@@ -42,10 +44,11 @@ if args["plot"]:
     ax3.set_xlabel('Ground State Population')
     ax3.set_ylabel('Phase Oscillation Amplitude (rad)')
 
-for pop,intensity,f in zip(gs_pop,intensities, args["dirs"]):
-    p=Path(f)
-    params = pd.read_csv(p / 'fit_params.csv')
-    cut = params[params['Time Delays']==-1.5].index.values
+for pop,intensity in zip(gs_pop,intensities):
+    params = pd.read_csv('fit_params'+str(intensity)+'.csv')
+    # print(params['Time Delays'])
+    # cut = params[params['Time Delays']==-1.974746].index.values
+    cut=[17]
     td = params['Time Delays']
     phase = params['Phase']
     for i in range(len(phase)):
