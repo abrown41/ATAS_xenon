@@ -8,5 +8,5 @@ time delay is chosen because the population agrees to \~6s.f. across the time
 delays) and the final pop_all which can be used to estimate the error in the
 calculation.
 
-The required data (EField and dipole files) are in the data directory. At the moment,
+The required data (EField and dipole files) is in the data directory. At the moment,
 the analysis scripts need tweaked to work with these files.
