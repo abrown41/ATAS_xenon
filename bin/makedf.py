@@ -2,13 +2,21 @@
 This script reads both the expec_z_all.* and EField.Xe* files from the individual directories,
 and puts them together into two dataframes, which are output to csv files: field.csv and dipole.csv.
 These csv files can then be read by the fit_script utility to generate the OD and perform the fitting.
-The directories containing the files from the RMT calculation are to be named delay_+_X.XXX or delay_-_X.XXX 
+The directories containing the files from the RMT calculation are to be named delay_+_X.XXX or delay_-_X.XXX
+
+Executed by:
+    python makedf.py <list of directories at each time delay>
 """
 import pandas as pd
 import glob
 import helper_functions as hf
 
-args = hf.read_command_line()
+def read_command_line():
+    parser = AP()
+    parser.add_argument('dirs', nargs="+",help="list of directories containing the fit_params.csv file for each IR intensity")
+    return vars(parser.parse_args())
+
+args=read_command_line()
 filelist=args["dirs"]
 filelist= hf.order_files(filelist)
 
