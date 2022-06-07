@@ -44,6 +44,24 @@ photonenergy = hf.get_energy_axis()[roi]
 # -----------------------------------------------------------------------
 
 def getOD(intensity):
+    """
+    Given an intensity, attempt to read the associated dipole and field files,
+    apply the exponential decay scaling to the dipole (to approximate Auger
+    decay) and calculate the optical density.
+
+    Parameters
+    ----------
+    intensity : float or str
+        intensity value used in the file name for the dipole?.?.csv and
+        field?.?.csv files. 
+
+    Returns
+    -------
+    w_roi : np.array 
+        photon energies in the region of interest (roi)
+    OD_sim : pd.DataFrame
+        dataframe containing the optical density computed at each time delay
+    """
 
     df1 = pd.read_csv(f"dipole{intensity}.csv")
     df2 = pd.read_csv(f"field{intensity}.csv")
@@ -52,9 +70,6 @@ def getOD(intensity):
 #                   Delay loop
 # -----------------------------------------------------------------------
 
-# Get delays
-    delay_strings = df1.columns.values[1:]
-#    td = delay_strings.astype(float)
     OD_sim = pd.DataFrame()
 
 # prepad signal with zeros to improve resolution
@@ -62,10 +77,8 @@ def getOD(intensity):
     slen = 2**21
     nzero = slen - file_length
 
-    for delay in delay_strings:
+    for delay in df1.columns.values[1:]:
         t_zero = 1 + float(delay) + 5.75
-
-        xuv_dipole = df1[delay]
         time = hf.au_to_fs(df1['Time']) - t_zero
         efield = df2[delay]
 
@@ -77,17 +90,18 @@ def getOD(intensity):
         lifetime = hf.au_to_fs(1/(hf.ev_to_au(gamma_xe1)/2))
         decay = np.exp(- time/lifetime)
         decay[time < 0] = 1
-
-        # blackman window
-        # window = np.blackman(file_length)
+        xuv_dipole = decay * df1[delay]
 
         # prepad to improve FT resolution
-        prepad = np.zeros(nzero)
-        field = np.concatenate((prepad,  efield))
-        dipole_pad = np.concatenate((prepad, decay * xuv_dipole))
+#        prepad = np.zeros(nzero)
+#        field = np.concatenate((prepad,  efield))
+#        dipole_pad = np.concatenate((prepad, xuv_dipole))
+        field = np.pad(efield, (nzero, 0), 'constant', constant_values=(0, 0))
+        dipole = np.pad(xuv_dipole, (nzero, 0), 'constant',
+                        constant_values=(0, 0))
 
         # FT to frequency domain
-        dw = np.fft.fft(dipole_pad)
+        dw = np.fft.fft(dipole)
         ew = np.fft.fft(field)
 
         t_mult = time[1] - time[0]
