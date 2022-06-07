@@ -14,6 +14,9 @@ The optional argument -p plots three figures:
     3. Maximum amplitude of the oscillating phase with corresponding Ground State 
        population at end of calculation.
 
+Saves .csv files with the fit parameters at each intensity, with the extracted oscillations
+at each intensity and with the ground state population and phase amplitude at each intensity.
+
 """
 
 import numpy as np
@@ -46,14 +49,23 @@ if args["plot"]:
 
 for pop,intensity in zip(gs_pop,intensities):
     params = pd.read_csv('fit_params'+str(intensity)+'.csv')
-    # print(params['Time Delays'])
-    # cut = params[params['Time Delays']==-1.974746].index.values
-    cut=[17]
     td = params['Time Delays']
+    strength = params['Line Strength']
+
     phase = params['Phase']
+    phase_error=params['Phase Error']
+
     for i in range(len(phase)):
         if phase[i]>1:
             phase[i]-=2*np.pi
+
+    # Resolution at IR intensity of 1.9 is twice as much
+    if intensity==1.9:
+        phase=phase[::2]
+        phase_error=phase_error[::2]
+        td=td[::2]
+        strength=strength[::2]
+
 
     width_df[str(intensity)]=params['Line Width']
     strength_df[str(intensity)]=params['Line Strength']
@@ -61,7 +73,21 @@ for pop,intensity in zip(gs_pop,intensities):
 
     avg_phase=hf.smooth_data(phase)
     osscilation = phase-avg_phase
-    osscilation = osscilation[cut[0]:]
+
+# To truncate phase at % of line strength:
+    # max_strength=np.amax(strength)
+    # cutoff=0.15*max_strength
+    # for j in strength:
+    #     if j < cutoff:
+    #         cut_index=np.where(strength==j)[0][0]
+
+# To truncate phase at specific delay:
+    for j in td:
+        if j < -0.5:
+            cut_index=np.where(td==j)[0][0]
+
+    osscilation = osscilation[cut_index:]
+    phase_error = phase_error[cut_index:]
 
     oscil_df[str(intensity)]=osscilation
 
@@ -69,14 +95,17 @@ for pop,intensity in zip(gs_pop,intensities):
     max_amp = np.amax(osscilation)
     del_amp = max_amp-min_amp
 
+    error_amp = np.amax(phase_error)
+
     amplitudes.append(del_amp)
 
     if args["plot"]:
-        ax1.plot(td[cut[0]:], osscilation+offset, label=str(intensity))
-        ax2.plot(intensity, del_amp, 'o')
-        ax3.plot(pop, del_amp, 'o')
+        ax1.plot(td[cut_index:], osscilation+offset, label=str(intensity))
+        ax2.errorbar(intensity, del_amp, fmt='o', yerr=error_amp, capsize=4.0)
+        ax3.errorbar(pop, del_amp, fmt='o', yerr=error_amp, capsize=4.0)
 
-oscil_df.insert(0, "Time Delay", td[cut[0]:])
+
+oscil_df.insert(0, "Time Delay", td[cut_index:])
 oscil_df.to_csv('extract_oscillations.csv', index=False)
 
 width_df.insert(0, "Time Delay", td)

@@ -71,7 +71,7 @@ slen = 2**21
 nzero = slen - file_length
 
 for delay in delay_strings:
-    t_zero = 1 + float(delay) + 5.75
+    t_zero = 0.17 + 900/41.34
 
     xuv_dipole = df1[delay]
     time = hf.au_to_fs(df1['Time']) - t_zero
@@ -120,7 +120,7 @@ for delay in delay_strings:
 
     params.append(popt)
     errors.append(np.sqrt(np.abs(np.diag(pcov))))
-    
+
     # reuse fit result in next iteration:
     # p_init = popt
     
@@ -135,19 +135,18 @@ td*=-1
 fig, (ax1,ax2,ax3) = plt.subplots(1, 3)
 
 ax1.plot(td, params[:,0])
+ax1.fill_between(td, params[:,0]+errors[:,0], params[:,0]-errors[:,0],  facecolor="gray", alpha=0.35)
 ax1.set_title('Line strength')
 
 ax2.plot(td, params[:,1])
+ax2.fill_between(td, params[:,1]+errors[:,1], params[:,1]-errors[:,1],  facecolor="gray", alpha=0.35)
 ax2.set_title('Phase (rad)')
 ax2.set_xlabel('Time delay (fs)')
 
 ax3.plot(td, params[:,2])
-ax3.set_title('Line width (eV)')
+ax3.fill_between(td, params[:,2]+errors[:,2], params[:,2]-errors[:,2],  facecolor="gray", alpha=0.35)
 
-plt.figure(3)
-plt.plot(td, params[:,3])
-plt.ylabel('Background')
-plt.xlabel('Time delay (fs)')
+ax3.set_title('Line width (eV)')
 
 #-----------------------------------------------------------------------
 #                   Image
@@ -174,6 +173,8 @@ cbar = fig.colorbar(im2, cax=cbar_ax)
 cbar_ax.set_title('OD')
 cbar.set_ticks([0,0.1,0.2])
 
+ax[0].set_xlim([55,56])
+ax[1].set_xlim([55,56])
 ax[0].set_ylabel(r'Time delay (fs)')
 ax[0].set_xlabel(r'Photon energy (eV)')
 ax[1].set_xlabel(r'Photon energy (eV)')
@@ -212,5 +213,8 @@ params_df['Time Delays'] = td
 params_df['Line Strength'] = params[:,0]
 params_df['Phase'] = params[:,1]
 params_df['Line Width'] = params[:,2]
+params_df['Line Strength Error'] = errors[:,0]
+params_df['Phase Error'] = errors[:,1]
+params_df['Line Width Error'] = errors[:,2]
 
 params_df.to_csv('fit_params'+str(intensity)+'.csv', index=False)
