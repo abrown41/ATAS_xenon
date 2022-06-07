@@ -203,7 +203,7 @@ def plotParams(td, params):
     return fig
 
 
-def getODfit(w_roi, params):
+def getODfit(w_roi, cols, params):
     """
     Use the fit parameters to reconstruct the OD as a function of w_roi
 
@@ -211,6 +211,8 @@ def getODfit(w_roi, params):
     ----------
     w_roi : np.array
         energy axis in the region of interest (roi)
+    cols : list-like
+        time delay headings for dataframe
     params : np.array
         dimensions (number of time delays, 4)
         the four fit parameters for each time delay.
@@ -225,14 +227,38 @@ def getODfit(w_roi, params):
         dataframe containing the reconstructed optical density as a function of
         w_roi for each time-delay
     """
-    OD_fit = np.zeros((params.shape[0], w_roi.size))
-    for p, popt in enumerate(params):
-        OD_fit[p] = hf.fit_lineshapes(w_roi, *popt)
+    OD_fit = {}
+    for col, popt in zip(cols, params):
+        OD_fit[col] = hf.fit_lineshapes(w_roi, *popt)
 
+    OD_fit = pd.DataFrame(OD_fit)
     return(OD_fit)
 
 
 def plotOD(w_roi, td, OD_sim, OD_fit):
+    """
+    provided with the energy axis, time delay axis and the optical density as a
+    function of energy for each time delay, produce a surface plot for both the
+    simulated and reconstructed OD.
+
+    Parameters
+    ----------
+    w_roi : np.array
+        energy axis in the region of interest (roi)
+    td    : list-like
+        time-delay axis
+    OD_sim : pd.DataFrame
+        dataframe containing the simulated optical density as a function of
+        w_roi for each time-delay
+    OD_fit : pd.DataFrame
+        dataframe containing the reconstructed optical density as a function of
+        w_roi for each time-delay
+
+    Returns
+    -------
+    fig : figure handle
+        figure handle for OD plot
+    """
     paramdict = {'cmap': 'jet', 'shading': 'nearest'}
 
     fig, ax = plt.subplots(nrows=1, ncols=2, num=5)
@@ -241,7 +267,7 @@ def plotOD(w_roi, td, OD_sim, OD_fit):
     im = ax[0].pcolor(w_roi-5.5, td, OD_sim.transpose(), **paramdict,
                       vmin=-0.04, vmax=0.25)
     vmin, vmax = im.get_clim()
-    im2 = ax[1].pcolor(w_roi-5.5, td, OD_fit, **paramdict,
+    im2 = ax[1].pcolor(w_roi-5.5, td, OD_fit.transpose(), **paramdict,
                        vmin=vmin, vmax=vmax)
 
     cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.75])
@@ -259,40 +285,31 @@ def plotOD(w_roi, td, OD_sim, OD_fit):
     return(ax)
 
 
+def outputData(w_roi, td, OD_fit, OD_sim, params):
+    OD_sim.insert(loc=0, column='Energy', value=w_roi)
+    OD_sim.to_csv(f'OD{intensity}.csv', index=False)
+
+    OD_fit.insert(loc=0, column='Energy', value=w_roi)
+    OD_fit.to_csv(f'OD_fit{intensity}.csv', index=False)
+
+    params_df = pd.DataFrame()
+    params_df['Time Delays'] = td
+    params_df['Line Strength'] = params[:, 0]
+    params_df['Phase'] = params[:, 1]
+    params_df['Line Width'] = params[:, 2]
+
+    params_df.to_csv('fit_params{intensity}.csv', index=False)
+
+
 w_roi, OD_sim = getOD(intensity)
 params = fitOD(w_roi, OD_sim)
-OD_fit = getODfit(w_roi, params)
-
 td = [-float(delay) for delay in OD_sim.columns]
+
+OD_fit = getODfit(w_roi, OD_sim.columns, params)
+
 plotParams(td, params)
 plotOD(w_roi, td, OD_sim, OD_fit)
 
 plt.show()
 
-# -----------------------------------------------------------------------
-#                   Save Time Delay Scan + Fit
-# -----------------------------------------------------------------------
-
-OD_sim.insert(loc=0, column='Energy', value=w_roi)
-
-OD_sim.to_csv(f'OD{intensity}.csv', index=False)
-
-fit_df = pd.DataFrame()
-fit_df['Energy'] = w_roi
-for col in range(len(OD_fit[:, 0])):
-    delay = str(td[col])
-    fit_df[delay] = OD_fit[col, :]
-
-fit_df.to_csv(f'OD_fit{intensity}.csv', index=False)
-
-# -----------------------------------------------------------------------
-#                   Save Fitting Parameters
-# -----------------------------------------------------------------------
-
-params_df = pd.DataFrame()
-params_df['Time Delays'] = td
-params_df['Line Strength'] = params[:, 0]
-params_df['Phase'] = params[:, 1]
-params_df['Line Width'] = params[:, 2]
-
-params_df.to_csv('fit_params{intensity}.csv', index=False)
+outputData(w_roi, td, OD_fit, OD_sim, params)
