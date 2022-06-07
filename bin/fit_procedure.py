@@ -43,6 +43,7 @@ photonenergy = hf.get_energy_axis()[roi]
 #                   Read Data
 # -----------------------------------------------------------------------
 
+
 def getOD(intensity):
     """
     Given an intensity, attempt to read the associated dipole and field files,
@@ -76,12 +77,12 @@ def getOD(intensity):
     nzero = slen - file_length
 # prepare the exponential decay factor
 # t_zero is 1 FWHM after the peak of the XUV.
-    t_zero = 21.87 
+    t_zero = 21.87
     time = hf.au_to_fs(df1['Time']) - t_zero
     lifetime = hf.au_to_fs(1/(hf.ev_to_au(gamma_xe1)/2))
     decay = np.exp(- time/lifetime)
     decay[time < 0] = 1
-    OD_sim = {} # for performance: build dict and then convert to dataframe
+    OD_sim = {}  # for performance: build dict and then convert to dataframe
 
     for delay in df1.columns.values[1:]:
         efield = df2[delay]
@@ -111,8 +112,8 @@ def getOD(intensity):
 
 def fitOD(w_roi, OD_sim):
     """
-    Given an energy axis and the optical density for a range of time delays, fit
-    the absorption line with the dipole control model, and return the fit
+    Given an energy axis and the optical density for a range of time delays,
+    fit the absorption line with the dipole control model, and return the fit
     parameters.
 
     Parameters
@@ -120,18 +121,20 @@ def fitOD(w_roi, OD_sim):
     w_roi : np.array
         energy axis in the region of interest (roi)
     OD_sim : pd.DataFrame
-        dataframe containing the optical density as a function of w_roi for each
-        time-delay
+        dataframe containing the optical density as a function of w_roi for
+        each time-delay
 
     Returns
     -------
     params : np.array
-        dimensions (number of time delays, 4) 
-        the four fit parameters for each time delay. 
+        dimensions (number of time delays, 4)
+        the four fit parameters for each time delay.
         params[:, 0] is the line strength
         params[:, 1] is the phase
         params[:, 2] is the line width
         params[:, 3] is the background term
+    errors : np.array
+        fitting errors corresponding to the params array
     """
 # -----------------------------------------------------------------------
 #                   Fit setup
@@ -142,7 +145,7 @@ def fitOD(w_roi, OD_sim):
     upper_bounds = [np.inf, np.pi, 2*gamma_xe1, 1]
     bounds = (lower_bounds, upper_bounds)
 
-# Initial guess for fitting parameters 
+# Initial guess for fitting parameters
 #                [z0, ϕ,   Γ,       c]
     p_init = np.array([1, 0, gamma_xe1, 0])
     params = []
@@ -163,10 +166,11 @@ def fitOD(w_roi, OD_sim):
         # p_init = popt
 
     params = np.array(params)
-    return params
+    errors = np.array(errors)
+    return params, errors
 
 
-def plotParams(td, params):
+def plotParams(td, params, errors):
     """
     given the time-delays and the fit parameters, plot the line strength, phase
     and line width as a function of time delay
@@ -182,6 +186,8 @@ def plotParams(td, params):
         params[:, 1] is the phase
         params[:, 2] is the line width
         params[:, 3] is the background term
+    errors : np.array
+        fitting errors corresponding to the params array
 
     Returns
     -------
@@ -189,15 +195,21 @@ def plotParams(td, params):
     """
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-
     ax1.plot(td, params[:, 0])
+    ax1.fill_between(td, params[:, 0]+errors[:, 0],
+                     params[:, 0]-errors[:, 0],  facecolor="gray", alpha=0.35)
     ax1.set_title('Line strength')
 
     ax2.plot(td, params[:, 1])
+    ax2.fill_between(td, params[:, 1]+errors[:, 1],
+                     params[:, 1]-errors[:, 1],  facecolor="gray", alpha=0.35)
     ax2.set_title('Phase (rad)')
     ax2.set_xlabel('Time delay (fs)')
 
     ax3.plot(td, params[:, 2])
+    ax3.fill_between(td, params[:, 2]+errors[:, 2],
+                     params[:, 2]-errors[:, 2],  facecolor="gray", alpha=0.35)
+
     ax3.set_title('Line width (eV)')
 
     return fig
@@ -285,7 +297,7 @@ def plotOD(w_roi, td, OD_sim, OD_fit):
     return(ax)
 
 
-def outputData(w_roi, td, OD_fit, OD_sim, params):
+def outputData(w_roi, td, OD_fit, OD_sim, params, errors, intensity):
     OD_sim.insert(loc=0, column='Energy', value=w_roi)
     OD_sim.to_csv(f'OD{intensity}.csv', index=False)
 
@@ -297,19 +309,22 @@ def outputData(w_roi, td, OD_fit, OD_sim, params):
     params_df['Line Strength'] = params[:, 0]
     params_df['Phase'] = params[:, 1]
     params_df['Line Width'] = params[:, 2]
+    params_df['Line Strength Error'] = errors[:, 0]
+    params_df['Phase Error'] = errors[:, 1]
+    params_df['Line Width Error'] = errors[:, 2]
 
-    params_df.to_csv('fit_params{intensity}.csv', index=False)
+    params_df.to_csv(f'fit_params{intensity}.csv', index=False)
 
 
 w_roi, OD_sim = getOD(intensity)
-params = fitOD(w_roi, OD_sim)
+params, errors = fitOD(w_roi, OD_sim)
 td = [-float(delay) for delay in OD_sim.columns]
 
 OD_fit = getODfit(w_roi, OD_sim.columns, params)
 
-plotParams(td, params)
+plotParams(td, params, errors)
 plotOD(w_roi, td, OD_sim, OD_fit)
 
 plt.show()
 
-outputData(w_roi, td, OD_fit, OD_sim, params)
+outputData(w_roi, td, OD_fit, OD_sim, params, errors, intensity)
