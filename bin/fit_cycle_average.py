@@ -72,27 +72,30 @@ for pop,intensity in zip(gs_pop,intensities):
     phase_df[str(intensity)]=params['Phase']
 
     avg_phase=hf.smooth_data(phase)
-    osscilation = phase-avg_phase
+    oscilation = phase-avg_phase
 
 # To truncate phase at % of line strength:
     # max_strength=np.amax(strength)
-    # cutoff=0.15*max_strength
+    # cutoff=0.05*max_strength
     # for j in strength:
     #     if j < cutoff:
     #         cut_index=np.where(strength==j)[0][0]
 
 # To truncate phase at specific delay:
     for j in td:
-        if j < -0.5:
+        if j < -1:
             cut_index=np.where(td==j)[0][0]
 
-    osscilation = osscilation[cut_index:]
+    oscilation = oscilation[cut_index:]
     phase_error = phase_error[cut_index:]
 
-    oscil_df[str(intensity)]=osscilation
+    oscil_df[str(intensity)]=oscilation
+    # Get max. amplitude and index
+    max_amp =np.amax(oscilation)
 
-    min_amp = np.amin(osscilation)
-    max_amp = np.amax(osscilation)
+    # Get min.amplitude after first max
+    min_amp = np.amin(oscilation[np.argmax(oscilation):])
+
     del_amp = max_amp-min_amp
 
     error_amp = np.amax(phase_error)
@@ -100,7 +103,7 @@ for pop,intensity in zip(gs_pop,intensities):
     amplitudes.append(del_amp)
 
     if args["plot"]:
-        ax1.plot(td[cut_index:], osscilation+offset, label=str(intensity))
+        ax1.plot(td[cut_index:], oscilation+offset, label=str(intensity))
         ax2.errorbar(intensity, del_amp, fmt='o', yerr=error_amp, capsize=4.0)
         ax3.errorbar(pop, del_amp, fmt='o', yerr=error_amp, capsize=4.0)
 
