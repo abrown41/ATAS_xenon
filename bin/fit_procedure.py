@@ -15,10 +15,6 @@ Where the argument -i chooses the IR intensity.
 
 Adapted from a script by Max.
 """
-
-# -----------------------------------------------------------------------
-#                    Imports
-# -----------------------------------------------------------------------
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy.constants import physical_constants as constants
@@ -32,19 +28,26 @@ args = hf.read_command_line()
 
 intensity = args["IR_intensity"]
 
-# -----------------------------------------------------------------------
-#                   Constants
-# -----------------------------------------------------------------------
-gamma_xe1 = 0.122  # from literature (Anderson 2001 I think?)
+gamma_xe1 = 0.122  # linewidth from literature (Anderson 2001)
 alpha = constants['fine-structure constant'][0]
 
-# set region of interest for fit
+# roi == region of interest
 roi = slice(*hf.get_roi(hf.get_energy_axis(), erange=(60, 62)))
-photonenergy = hf.get_energy_axis()[roi]
 
-# -----------------------------------------------------------------------
-#                   Read Data
-# -----------------------------------------------------------------------
+
+class OpticalDensity(pd.DataFrame):
+    """
+    Class for holding the optical density data. The data is held in a pandas
+    DataFrame, but the class provides three additional attributes, for the laser
+    intensity, the photon energy axis and the time delays (which are held inthe
+    column headings, but converted to floats)
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.intensity = intensity
+        self.energies = None
+        self.timedelays = [-float(delay) for delay in self.columns]
 
 
 def getOD(intensity):
@@ -61,12 +64,8 @@ def getOD(intensity):
 
     Returns
     -------
-    OD_sim : DataFrame plus metadata
+    OD_sim : OpticalDensity
         dataframe containing the optical density computed at each time delay.
-        additional attributes
-        OD_sim.intensity: the laser intensity for the simulation
-        OD_sim.energies : the photon energies in region of interest
-        OD_sim.td       : the list of time delays from the column headings
     """
 
     df1 = pd.read_csv(f"dipole{intensity}.csv")
@@ -111,10 +110,8 @@ def getOD(intensity):
         OD_roi = OD[np.all([(w_ev > 59), (w_ev < 62)], axis=0)]
         OD_sim[delay] = OD_roi
 
-    OD_sim = pd.DataFrame(OD_sim)
-    OD_sim.intensity = intensity
+    OD_sim = OpticalDensity(OD_sim)
     OD_sim.energies = w_roi
-    OD_sim.td = [-float(delay) for delay in OD_sim.columns]
 
     return OD_sim
 
@@ -127,12 +124,8 @@ def fitOD(OD_sim):
 
     Parameters
     ----------
-    OD_sim : DataFrame plus metadata
+    OD_sim : OpticalDensity
         dataframe containing the optical density computed at each time delay.
-        additional attributes
-        OD_sim.intensity: the laser intensity for the simulation
-        OD_sim.energies : the photon energies in region of interest
-        OD_sim.td       : the list of time delays from the column headings
 
     Returns
     -------
@@ -231,12 +224,8 @@ def getODfit(OD_sim, params):
 
     Parameters
     ----------
-    OD_sim : DataFrame plus metadata
+    OD_sim : OpticalDensity
         dataframe containing the optical density computed at each time delay.
-        additional attributes
-        OD_sim.intensity: the laser intensity for the simulation
-        OD_sim.energies : the photon energies in region of interest
-        OD_sim.td       : the list of time delays from the column headings
 
     params : np.array
         dimensions (number of time delays, 4)
@@ -248,7 +237,7 @@ def getODfit(OD_sim, params):
 
     Returns
     -------
-    OD_fit : pd.DataFrame
+    OD_fit : OpticalDensity
         dataframe containing the reconstructed optical density as a function of
         energy for each time-delay
     """
@@ -256,7 +245,8 @@ def getODfit(OD_sim, params):
     for col, popt in zip(OD_sim.columns, params):
         OD_fit[col] = hf.fit_lineshapes(OD_sim.energies, *popt)
 
-    OD_fit = pd.DataFrame(OD_fit)
+    OD_fit = OpticalDensity(OD_fit)
+    OD_fit.energies = OD_sim.energies
     return(OD_fit)
 
 
@@ -268,15 +258,10 @@ def plotOD(OD_sim, OD_fit):
 
     Parameters
     ----------
-    OD_sim : DataFrame plus metadata
+    OD_sim : OpticalDensity
         dataframe containing the optical density computed at each time delay.
-        additional attributes
-        OD_sim.intensity: the laser intensity for the simulation
-        OD_sim.energies : the photon energies in region of interest
-        OD_sim.td       : the list of time delays from the column headings
-    OD_fit : pd.DataFrame
+    OD_fit : OpticalDensity
         dataframe containing the reconstructed optical density as a function of
-        energy for each time-delay
 
     Returns
     -------
@@ -288,10 +273,10 @@ def plotOD(OD_sim, OD_fit):
     fig, ax = plt.subplots(nrows=1, ncols=2, num=5)
     fig.subplots_adjust(right=0.9, left=0.1, top=0.9, bottom=0.15, wspace=0.2)
 
-    im = ax[0].pcolor(OD_sim.energies-5.5, OD_sim.td, OD_sim.transpose(),
+    im = ax[0].pcolor(OD_sim.energies-5.5, OD_sim.timedelays, OD_sim.transpose(),
                       **paramdict, vmin=-0.04, vmax=0.25)
     vmin, vmax = im.get_clim()
-    im2 = ax[1].pcolor(OD_sim.energies-5.5, OD_sim.td, OD_fit.transpose(),
+    im2 = ax[1].pcolor(OD_sim.energies-5.5, OD_fit.timedelays, OD_fit.transpose(),
                        **paramdict, vmin=vmin, vmax=vmax)
 
     cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.75])
@@ -310,6 +295,26 @@ def plotOD(OD_sim, OD_fit):
 
 
 def outputData(OD_fit, OD_sim, params, errors):
+    """
+    Write the simulated and fitted optical densities to file, as well as the
+    fitting parameters.
+
+    Parameters
+    ----------
+    OD_sim : OpticalDensity
+        dataframe containing the optical density computed at each time delay.
+    OD_fit : OpticalDensity
+        dataframe containing the reconstructed optical density as a function of
+    params : np.array
+        dimensions (number of time delays, 4)
+        the four fit parameters for each time delay.
+        params[:, 0] is the line strength
+        params[:, 1] is the phase
+        params[:, 2] is the line width
+        params[:, 3] is the background term
+    errors : np.array
+        fitting errors corresponding to the params array
+    """
     OD_sim.insert(loc=0, column='Energy', value=OD_sim.energies)
     OD_sim.to_csv(f'OD{OD_sim.intensity}.csv', index=False)
 
@@ -317,7 +322,7 @@ def outputData(OD_fit, OD_sim, params, errors):
     OD_fit.to_csv(f'OD_fit{OD_sim.intensity}.csv', index=False)
 
     params_df = pd.DataFrame()
-    params_df['Time Delays'] = OD_sim.td
+    params_df['Time Delays'] = OD_sim.timedelays
     params_df['Line Strength'] = params[:, 0]
     params_df['Phase'] = params[:, 1]
     params_df['Line Width'] = params[:, 2]
@@ -333,7 +338,7 @@ params, errors = fitOD(OD_sim)
 
 OD_fit = getODfit(OD_sim, params)
 
-plotParams(OD_sim.td, params, errors)
+plotParams(OD_sim.timedelays, params, errors)
 plotOD(OD_sim, OD_fit)
 
 plt.show()
