@@ -15,14 +15,8 @@ Created on Thu Nov  4 10:00:07 2021
 """
 
 import numpy as np
-import pandas as pd
 import scipy.constants as cnt
-import matplotlib.pyplot as plt
-import scipy.optimize as sp
-import glob
 from argparse import ArgumentParser as AP
-from pathlib import Path
-
 
 # -----------------------------------------------------------------------
 #                   Constants
@@ -31,6 +25,10 @@ from pathlib import Path
 pldp_au = 0.77              # path-length-density-product in atomic units
 alpha = cnt.constants.fine_structure
 lineshape_constant = pldp_au/np.log(10)*4*np.pi*alpha
+
+# resonance energies after calibration
+
+# (retrieved by fitting a Lorentzian to the spectra far out of temporal overlap)
 
 # -----------------------------------------------------------------------
 #                   Functions
@@ -104,44 +102,6 @@ def ev_to_au(energy_in_ev):
     return ev_to_joule / cnt.value("atomic unit of energy")
 
 
-def cos2_window(index1, index2, width, size):
-
-    indmax = np.maximum(index1, index2)
-    indmin = np.minimum(index1, index2)
-
-    arr1 = np.sin(np.pi/2/width*np.array(range(width)))**2.
-    arr2 = np.ones((indmax-indmin))
-    arr3 = np.cos(np.pi/2/width*np.array(range(width)))**2.
-
-    checksum = size-indmax+indmin-2*width
-    arr4 = np.zeros((checksum))
-
-    if np.greater_equal(checksum, 0.):
-        return np.roll(np.concatenate((arr1, arr2, arr3, arr4)), indmin-width)
-
-    else:
-        print('Cos2 Window error. Sizes not okay.')
-        return np.zeros((size))
-
-
-def taper_cos2(width, array):
-
-    number_of_zeros = int(width / 100.)
-    width -= number_of_zeros
-    modulation = np.ones(array.shape[0])
-
-    if not width == 0:
-        taper_mod = np.arange(1, width + 1)
-        taper_mod = np.cos(np.pi / (2.0 * width) * taper_mod) ** 2
-        modulation[array.shape[0] - (width + number_of_zeros)
-                                     :array.shape[0] - number_of_zeros] = taper_mod
-        modulation[number_of_zeros:width + number_of_zeros] = taper_mod[::-1]
-
-    modulation[array.shape[0] - number_of_zeros:] = 0.0
-    modulation[0:number_of_zeros] = 0.0
-    return modulation
-
-
 def TDDM_Reconstruction(data, ax_off, ax_mult):
 
     if len(data.shape) == 1:
@@ -169,59 +129,6 @@ def TDDM_Reconstruction(data, ax_off, ax_mult):
         tddm = np.fft.fft(p_data, axis=0, norm='ortho')
 
         return (tddm, axis)
-
-
-def get_energy_axis():
-
-    your_energy_axis = np.linspace(51.012496, 67.000271, 1962)
-
-    return your_energy_axis
-
-
-def getOD(intensity):
-    """ Returns a whole time delay scan at a given intensity.
-
-        Shape (td_axis_size, energy_axis_size). """
-
-    fname = "int"+str(intensity)+".csv"
-
-    df = pd.read_csv(fname)
-
-    time_delay_axis = np.array([float(x) for x in df.columns])
-
-    return df.transpose().values, time_delay_axis
-
-
-def get_intensities():
-
-    return [1.3, 1.6, 1.9, 2.2, 2.5]
-
-
-def get_roi(energy_axis, erange=(60, 62)):
-
-    for i, e in enumerate(energy_axis):
-
-        if e > erange[0]:
-
-            first = i
-
-            break
-
-    for i, e in enumerate(energy_axis):
-
-        if e > erange[1]:
-
-            last = i
-
-            break
-
-    return (first, last)
-
-
-def wrap(phase, offset=0):
-    """ Opposite of np.unwrap. Restrict phase to [-2*pi, 2*pi]. """
-
-    return (phase + np.pi + offset) % (2 * np.pi) - np.pi - offset
 
 
 def DCM_lineshape(energy_axis, z, phi, resonance_energy, gamma):
@@ -263,12 +170,6 @@ def DCM_lineshape(energy_axis, z, phi, resonance_energy, gamma):
     return z * lineshape
 
 
-# resonance energies after calibration
-
-# (retrieved by fitting a Lorentzian to the spectra far out of temporal overlap)
-e_res = [60.88]
-
-
 def fit_lineshapes(energy_axis, *params):
     """
 
@@ -303,6 +204,7 @@ def fit_lineshapes(energy_axis, *params):
         offset to fit the non-resonant background.
 
     """
+    global e_res
 
     model = np.zeros(energy_axis.shape)
 
@@ -325,12 +227,31 @@ def fit_lineshapes(energy_axis, *params):
 
 
 def read_command_line():
+    global e_res
     parser = AP()
-    parser.add_argument('-p', '--plot', help="show a plot",
+    parser.add_argument('-p', '--plot', help="show the plotted data",
+                        action='store_true', default=False)
+    parser.add_argument('-o', '--output', help="save data to file",
                         action='store_true', default=False)
     parser.add_argument('-i', '--IR_intensity',
                         type=float, help="IR intensity")
-    return vars(parser.parse_args())
+    parser.add_argument('--energy_shift',
+                        help="energy in eV by which to shift the energy axis",
+                        type=float, default=-5.5)
+    parser.add_argument('--e_res',
+                        help="positions of resonances in eV (before shift)",
+                        type=list, default=[60.88])
+
+    args = vars(parser.parse_args())
+
+    if not args['plot']:
+        args['output'] = True
+    e_res = args['e_res']
+    roi_lo = min(e_res) - 1.5
+    roi_hi = max(e_res) + 1.5
+    args['roi'] = [roi_lo, roi_hi]
+    e_res = [e + args['energy_shift'] for e in e_res]
+    return args
 
 
 def moving_average(input_data, window_size):
@@ -343,32 +264,3 @@ def smooth_data(wdata, nits=8):
     for ii in np.arange(nits):
         out_data = moving_average(out_data, 4)
     return out_data
-
-
-def strip_num(filename):
-    """
-    Obtain the time delay from the directory name
-    """
-    import re
-    pat = re.compile("[0-9]{1}.[0-9]{2}")
-    m = pat.search(filename)
-    pat = re.compile("[+,-]")
-    n = pat.search(filename)
-    return(float(n.group(0)+m.group(0)))
-
-
-def order_files(filelist):
-    """
-    Sort the files into increasing order of time delay
-    """
-    from operator import itemgetter
-    td_list = []
-    for fname in filelist:
-        td_list.append((fname, strip_num(fname)))
-
-    return(sorted(td_list, key=itemgetter(1), reverse=True))
-
-
-def grab_data(fname):
-    df = pd.read_csv(fname, delim_whitespace=True)
-    return (df)

@@ -15,33 +15,54 @@ Where the argument -i chooses the IR intensity.
 
 Adapted from a script by Max.
 """
-
-# -----------------------------------------------------------------------
-#                    Imports
-# -----------------------------------------------------------------------
 import numpy as np
-from scipy.optimize import curve_fit
-from scipy.constants import physical_constants as constants
 import pandas as pd
 import matplotlib.pyplot as plt
 import helper_functions as hf
+import warnings
+warnings.filterwarnings("ignore")
 
 args = hf.read_command_line()
+energy_shift = args['energy_shift']
+roi = args['roi']
 intensity = args["IR_intensity"]
+literature_linewidth = 0.122  # eV linewidth from literature (Anderson 2001)
 
-# -----------------------------------------------------------------------
-#                   Constants
-# -----------------------------------------------------------------------
-gamma_xe1 = 0.122  # from literature (Anderson 2001 I think?)
-alpha = constants['fine-structure constant'][0]
 
-# set region of interest for fit
-roi = slice(*hf.get_roi(hf.get_energy_axis(), erange=(60, 62)))
-photonenergy = hf.get_energy_axis()[roi]
+class OpticalDensity(pd.DataFrame):
+    """
+    Class for holding the optical density data. The data is held in a pandas
+    DataFrame, but the class provides three additional attributes, for the
+    laser intensity, the photon energy axis and the time delays (which are held
+    in the column headings, but converted to floats)
+    """
 
-# -----------------------------------------------------------------------
-#                   Read Data
-# -----------------------------------------------------------------------
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.intensity = intensity
+        self.energies = None
+        self.timedelays = [-float(delay) for delay in self.columns]
+
+
+def AugerDecayFactor(time_in_au, t_zero=904.1058):
+    """
+    Prepare the exponential decay factor to simulate Auger decay in the
+    simulated dipole. The decay factor is exp(-t/gamma) where gamma is the
+    line width.
+    Parameters
+    ----------
+    time_in_au : list-like
+        array of times at which the dipole has been evaluated in atomic units.
+    t_zero : float
+        the time at which to start the exponential decay which is the end of
+        the XUV pulse: 1 FWHM after the peak of the XUV.
+    """
+    time = time_in_au - t_zero
+    lifetime = 1/(hf.ev_to_au(literature_linewidth)/2)
+    decay = np.exp(- time/lifetime)
+    decay[time < 0] = 1
+    return decay
 
 
 def getOD(intensity):
@@ -54,34 +75,32 @@ def getOD(intensity):
     ----------
     intensity : float or str
         intensity value used in the file name for the dipole?.?.csv and
-        field?.?.csv files. 
+        field?.?.csv files.
 
     Returns
     -------
-    w_roi : np.array 
-        photon energies in the region of interest (roi)
-    OD_sim : pd.DataFrame
-        dataframe containing the optical density computed at each time delay
+    OD_sim : OpticalDensity
+        dataframe containing the optical density computed at each time delay.
     """
+    from scipy.constants import physical_constants
+    alpha = physical_constants['fine-structure constant'][0]
 
     df1 = pd.read_csv(f"dipole{intensity}.csv")
     df2 = pd.read_csv(f"field{intensity}.csv")
 
-# -----------------------------------------------------------------------
-#                   Delay loop
-# -----------------------------------------------------------------------
 
 # prepad signal with zeros to improve resolution
     file_length = len(df1)
-    slen = 2**21
-    nzero = slen - file_length
-# prepare the exponential decay factor
-# t_zero is 1 FWHM after the peak of the XUV.
-    t_zero = 21.87
-    time = hf.au_to_fs(df1['Time']) - t_zero
-    lifetime = hf.au_to_fs(1/(hf.ev_to_au(gamma_xe1)/2))
-    decay = np.exp(- time/lifetime)
-    decay[time < 0] = 1
+    desired_length = 2**21
+    num_zeros_to_pad = desired_length - file_length
+
+    decay = AugerDecayFactor(df1['Time'])
+
+    dt = df1['Time'][1] - df1['Time'][0]
+    w = np.fft.fftfreq(desired_length, dt/(2*np.pi))
+    w_ev = hf.au_to_ev(w)
+    w_roi = w_ev[np.all([(w_ev > roi[0]), (w_ev < roi[1])], axis=0)]
+
     OD_sim = {}  # for performance: build dict and then convert to dataframe
 
     for delay in df1.columns.values[1:]:
@@ -89,28 +108,25 @@ def getOD(intensity):
         xuv_dipole = decay * df1[delay]
 
         # prepad to improve FT resolution
-        field = np.pad(efield, (nzero, 0), 'constant', constant_values=(0, 0))
-        dipole = np.pad(xuv_dipole, (nzero, 0), 'constant',
-                        constant_values=(0, 0))
+        field = np.pad(efield, (num_zeros_to_pad, 0),
+                       'constant', constant_values=(0, 0))
+        dipole = np.pad(xuv_dipole, (num_zeros_to_pad, 0),
+                        'constant', constant_values=(0, 0))
 
-        # FT to frequency domain
         dw = np.fft.fft(dipole)
         ew = np.fft.fft(field)
-
-        dt = time[1] - time[0]
-        w = np.fft.fftfreq(field.shape[0], hf.fs_to_au(dt)/(2*np.pi))
-        w_ev = hf.au_to_ev(w)
-        w_roi = w_ev[np.all([(w_ev > 59), (w_ev < 62)], axis=0)]
-
         OD = -4*np.pi*alpha*w*np.imag(dw/ew)
-        OD_roi = OD[np.all([(w_ev > 59), (w_ev < 62)], axis=0)]
+
+        OD_roi = OD[np.all([(w_ev > roi[0]), (w_ev < roi[1])], axis=0)]
         OD_sim[delay] = OD_roi
 
-    OD_sim = pd.DataFrame(OD_sim)
-    return w_roi, OD_sim
+    OD_sim = OpticalDensity(OD_sim)
+    OD_sim.energies = w_roi + energy_shift
+
+    return OD_sim
 
 
-def fitOD(w_roi, OD_sim):
+def fitOD(OD_sim):
     """
     Given an energy axis and the optical density for a range of time delays,
     fit the absorption line with the dipole control model, and return the fit
@@ -118,36 +134,25 @@ def fitOD(w_roi, OD_sim):
 
     Parameters
     ----------
-    w_roi : np.array
-        energy axis in the region of interest (roi)
-    OD_sim : pd.DataFrame
-        dataframe containing the optical density as a function of w_roi for
-        each time-delay
+    OD_sim : OpticalDensity
+        dataframe containing the optical density computed at each time delay.
 
     Returns
     -------
-    params : np.array
-        dimensions (number of time delays, 4)
-        the four fit parameters for each time delay.
-        params[:, 0] is the line strength
-        params[:, 1] is the phase
-        params[:, 2] is the line width
-        params[:, 3] is the background term
-    errors : np.array
-        fitting errors corresponding to the params array
+    params : pd.DataFrame
+        Fit parameters and fitting errors for each time delay
     """
-# -----------------------------------------------------------------------
-#                   Fit setup
-# -----------------------------------------------------------------------
+    from scipy.optimize import curve_fit
+
 # fit parameters:[line_strength, phase, line_width, constant_background_term)
 #              [  z0,   ϕ,     Γ,             c]
-    lower_bounds = [1e-6,  -np.pi, 0.5*gamma_xe1, -1]
-    upper_bounds = [np.inf, np.pi, 2*gamma_xe1, 1]
+    lower_bounds = [1e-6,  -np.pi, 0.5*literature_linewidth, -1]
+    upper_bounds = [np.inf, np.pi, 2*literature_linewidth, 1]
     bounds = (lower_bounds, upper_bounds)
 
 # Initial guess for fitting parameters
 #                [z0, ϕ,   Γ,       c]
-    p_init = np.array([1, 0, gamma_xe1, 0])
+    p_init = np.array([1, 0, literature_linewidth, 0])
     params = []
     errors = []
 
@@ -156,38 +161,37 @@ def fitOD(w_roi, OD_sim):
         p_init[:-1:3] = abs(p_init[:-1:3])
         p_init[2:-1:3] = abs(p_init[2:-1:3])
 
-        popt, pcov = curve_fit(hf.fit_lineshapes, w_roi, OD_sim[delay],
-                               p_init, maxfev=1000000, bounds=bounds)
+        popt, pcov = curve_fit(hf.fit_lineshapes, OD_sim.energies,
+                               OD_sim[delay], p_init, maxfev=1000000,
+                               bounds=bounds)
 
         params.append(popt)
         errors.append(np.sqrt(np.abs(np.diag(pcov))))
 
-        # reuse fit result in next iteration:
-        # p_init = popt
-
     params = np.array(params)
     errors = np.array(errors)
-    return params, errors
+    params_df = pd.DataFrame()
+    params_df['Time Delays'] = OD_sim.timedelays
+    params_df['Line Strength'] = params[:, 0]
+    params_df['Phase'] = params[:, 1]
+    params_df['Line Width'] = params[:, 2]
+    params_df['Background'] = params[:, 3]
+    params_df['Line Strength Error'] = errors[:, 0]
+    params_df['Phase Error'] = errors[:, 1]
+    params_df['Line Width Error'] = errors[:, 2]
+
+    return params_df
 
 
-def plotParams(td, params, errors):
+def plotParams(params):
     """
     given the time-delays and the fit parameters, plot the line strength, phase
     and line width as a function of time delay
 
     Parameters
     ----------
-    td : list
-        list of time delay values
-    params : np.array
-        dimensions (number of time delays, 4)
-        the four fit parameters for each time delay.
-        params[:, 0] is the line strength
-        params[:, 1] is the phase
-        params[:, 2] is the line width
-        params[:, 3] is the background term
-    errors : np.array
-        fitting errors corresponding to the params array
+    params : pd.DataFrame
+        Fit parameters and fitting errors for each time delay
 
     Returns
     -------
@@ -195,59 +199,63 @@ def plotParams(td, params, errors):
     """
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-    ax1.plot(td, params[:, 0])
-    ax1.fill_between(td, params[:, 0]+errors[:, 0],
-                     params[:, 0]-errors[:, 0],  facecolor="gray", alpha=0.35)
-    ax1.set_title('Line strength')
+    axs = {
+        'Line Strength': ax1,
+        'Phase': ax2,
+        'Line Width': ax3
+    }
+    units = {
+        'Line Strength': '',
+        'Phase': '(rad)',
+        'Line Width': '(eV)'
+    }
+    for parameter in axs:
+        axs[parameter].plot(params['Time Delays'], params[parameter])
+        axs[parameter].fill_between(
+            params['Time Delays'],
+            params[parameter] + params[f'{parameter} Error'],
+            params[parameter] - params[f'{parameter} Error'],
+            facecolor="gray", alpha=0.35)
+        axs[parameter].set_title(f'{parameter} {units[parameter]}')
 
-    ax2.plot(td, params[:, 1])
-    ax2.fill_between(td, params[:, 1]+errors[:, 1],
-                     params[:, 1]-errors[:, 1],  facecolor="gray", alpha=0.35)
-    ax2.set_title('Phase (rad)')
     ax2.set_xlabel('Time delay (fs)')
-
-    ax3.plot(td, params[:, 2])
-    ax3.fill_between(td, params[:, 2]+errors[:, 2],
-                     params[:, 2]-errors[:, 2],  facecolor="gray", alpha=0.35)
-
-    ax3.set_title('Line width (eV)')
 
     return fig
 
 
-def getODfit(w_roi, cols, params):
+def getODfit(OD_sim, params):
     """
-    Use the fit parameters to reconstruct the OD as a function of w_roi
+    Use the fit parameters to reconstruct the OD as a function of energy
 
     Parameters
     ----------
-    w_roi : np.array
-        energy axis in the region of interest (roi)
-    cols : list-like
-        time delay headings for dataframe
-    params : np.array
-        dimensions (number of time delays, 4)
-        the four fit parameters for each time delay.
-        params[:, 0] is the line strength
-        params[:, 1] is the phase
-        params[:, 2] is the line width
-        params[:, 3] is the background term
+    OD_sim : OpticalDensity
+        dataframe containing the optical density computed at each time delay.
+
+    params : pd.DataFrame
+        Fit parameters and fitting errors for each time delay
 
     Returns
     -------
-    OD_fit : pd.DataFrame
+    OD_fit : OpticalDensity
         dataframe containing the reconstructed optical density as a function of
-        w_roi for each time-delay
+        energy for each time-delay
     """
     OD_fit = {}
-    for col, popt in zip(cols, params):
-        OD_fit[col] = hf.fit_lineshapes(w_roi, *popt)
+    for col in OD_sim.columns:
+        row = params.loc[params['Time Delays'] == -float(col)]
+        popt = [row['Line Strength'].values, row['Phase'],
+                row['Line Width'], row['Background']]
+        popt = np.reshape(popt, (4,))
+        OD_fit[col] = hf.fit_lineshapes(OD_sim.energies, *popt)
 
-    OD_fit = pd.DataFrame(OD_fit)
+    OD_fit = OpticalDensity(OD_fit)
+    OD_fit.energies = OD_sim.energies 
+    OD_fit.timedelays = OD_sim.timedelays
     return(OD_fit)
 
 
-def plotOD(w_roi, td, OD_sim, OD_fit):
+def plotOD(OD_sim, OD_fit):
     """
     provided with the energy axis, time delay axis and the optical density as a
     function of energy for each time delay, produce a surface plot for both the
@@ -255,16 +263,10 @@ def plotOD(w_roi, td, OD_sim, OD_fit):
 
     Parameters
     ----------
-    w_roi : np.array
-        energy axis in the region of interest (roi)
-    td    : list-like
-        time-delay axis
-    OD_sim : pd.DataFrame
-        dataframe containing the simulated optical density as a function of
-        w_roi for each time-delay
-    OD_fit : pd.DataFrame
+    OD_sim : OpticalDensity
+        dataframe containing the optical density computed at each time delay.
+    OD_fit : OpticalDensity
         dataframe containing the reconstructed optical density as a function of
-        w_roi for each time-delay
 
     Returns
     -------
@@ -276,11 +278,11 @@ def plotOD(w_roi, td, OD_sim, OD_fit):
     fig, ax = plt.subplots(nrows=1, ncols=2, num=5)
     fig.subplots_adjust(right=0.9, left=0.1, top=0.9, bottom=0.15, wspace=0.2)
 
-    im = ax[0].pcolor(w_roi-5.5, td, OD_sim.transpose(), **paramdict,
-                      vmin=-0.04, vmax=0.25)
+    im = ax[0].pcolor(OD_sim.energies, OD_sim.timedelays,
+                      OD_sim.transpose(), **paramdict, vmin=-0.04, vmax=0.25)
     vmin, vmax = im.get_clim()
-    im2 = ax[1].pcolor(w_roi-5.5, td, OD_fit.transpose(), **paramdict,
-                       vmin=vmin, vmax=vmax)
+    im2 = ax[1].pcolor(OD_sim.energies, OD_fit.timedelays,
+                       OD_fit.transpose(), **paramdict, vmin=vmin, vmax=vmax)
 
     cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.75])
     cbar = fig.colorbar(im2, cax=cbar_ax)
@@ -297,34 +299,39 @@ def plotOD(w_roi, td, OD_sim, OD_fit):
     return(ax)
 
 
-def outputData(w_roi, td, OD_fit, OD_sim, params, errors, intensity):
-    OD_sim.insert(loc=0, column='Energy', value=w_roi)
-    OD_sim.to_csv(f'OD{intensity}.csv', index=False)
+def outputData(OD_fit, OD_sim, params):
+    """
+    Write the simulated and fitted optical densities to file, as well as the
+    fitting parameters.
 
-    OD_fit.insert(loc=0, column='Energy', value=w_roi)
-    OD_fit.to_csv(f'OD_fit{intensity}.csv', index=False)
+    Parameters
+    ----------
+    OD_sim : OpticalDensity
+        dataframe containing the optical density computed at each time delay.
+    OD_fit : OpticalDensity
+        dataframe containing the reconstructed optical density as a function of
+    params : pd.DataFrame
+        Fit parameters and fitting errors for each time delay
+    """
+    OD_sim.insert(loc=0, column='Energy', value=OD_sim.energies)
+    OD_sim.to_csv(f'OD{OD_sim.intensity}.csv', index=False)
 
-    params_df = pd.DataFrame()
-    params_df['Time Delays'] = td
-    params_df['Line Strength'] = params[:, 0]
-    params_df['Phase'] = params[:, 1]
-    params_df['Line Width'] = params[:, 2]
-    params_df['Line Strength Error'] = errors[:, 0]
-    params_df['Phase Error'] = errors[:, 1]
-    params_df['Line Width Error'] = errors[:, 2]
+    OD_fit.insert(loc=0, column='Energy', value=OD_sim.energies)
+    OD_fit.to_csv(f'OD_fit{OD_sim.intensity}.csv', index=False)
 
-    params_df.to_csv(f'fit_params{intensity}.csv', index=False)
+    params.to_csv(f'fit_params{OD_sim.intensity}.csv', index=False)
 
 
-w_roi, OD_sim = getOD(intensity)
-params, errors = fitOD(w_roi, OD_sim)
-td = [-float(delay) for delay in OD_sim.columns]
+OD_sim = getOD(intensity)
+params = fitOD(OD_sim)
 
-OD_fit = getODfit(w_roi, OD_sim.columns, params)
+OD_fit = getODfit(OD_sim, params)
 
-plotParams(td, params, errors)
-plotOD(w_roi, td, OD_sim, OD_fit)
+if args['plot']:
+    plotParams(params)
+    plotOD(OD_sim, OD_fit)
 
-plt.show()
+    plt.show()
 
-outputData(w_roi, td, OD_fit, OD_sim, params, errors, intensity)
+if args['output']:
+    outputData(OD_fit, OD_sim, params)
