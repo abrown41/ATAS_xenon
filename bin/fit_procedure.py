@@ -350,7 +350,10 @@ def calc_or_read(fname, readRoutine, calcRoutine, **kwargs):
     read_from_file = "n"
 
     if isfile(fname):
-        read_from_file = input(f"file {fname} already exists: do you want \
+        if args['read_all']:
+            read_from_file = 'y'
+        else:
+            read_from_file = input(f"file {fname} already exists: do you want \
 to read data from file? y/n: ")
 
     if read_from_file == "n":

@@ -241,6 +241,9 @@ def read_command_line():
     parser.add_argument('--e_res',
                         help="positions of resonances in eV (before shift)",
                         type=list, default=[60.88])
+    parser.add_argument('-r', '--read_all',
+                        help="read all data from file rather than recalculate",
+                        action='store_true', default=False)
 
     args = vars(parser.parse_args())
 
