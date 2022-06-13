@@ -129,15 +129,8 @@ def fitOD(OD_sim):
 
     Returns
     -------
-    params : np.array
-        dimensions (number of time delays, 4)
-        the four fit parameters for each time delay.
-        params[:, 0] is the line strength
-        params[:, 1] is the phase
-        params[:, 2] is the line width
-        params[:, 3] is the background term
-    errors : np.array
-        fitting errors corresponding to the params array
+    params : pd.DataFrame
+        Fit parameters and fitting errors for each time delay
     """
 # -----------------------------------------------------------------------
 #                   Fit setup
@@ -159,38 +152,37 @@ def fitOD(OD_sim):
         p_init[:-1:3] = abs(p_init[:-1:3])
         p_init[2:-1:3] = abs(p_init[2:-1:3])
 
-        popt, pcov = curve_fit(hf.fit_lineshapes, OD_sim.energies, OD_sim[delay],
-                               p_init, maxfev=1000000, bounds=bounds)
+        popt, pcov = curve_fit(hf.fit_lineshapes, OD_sim.energies,
+                               OD_sim[delay], p_init, maxfev=1000000,
+                               bounds=bounds)
 
         params.append(popt)
         errors.append(np.sqrt(np.abs(np.diag(pcov))))
 
-        # reuse fit result in next iteration:
-        # p_init = popt
-
     params = np.array(params)
     errors = np.array(errors)
-    return params, errors
+    params_df = pd.DataFrame()
+    params_df['Time Delays'] = OD_sim.timedelays
+    params_df['Line Strength'] = params[:, 0]
+    params_df['Phase'] = params[:, 1]
+    params_df['Line Width'] = params[:, 2]
+    params_df['Background'] = params[:, 3]
+    params_df['Line Strength Error'] = errors[:, 0]
+    params_df['Phase Error'] = errors[:, 1]
+    params_df['Line Width Error'] = errors[:, 2]
+
+    return params_df
 
 
-def plotParams(td, params, errors):
+def plotParams(params):
     """
     given the time-delays and the fit parameters, plot the line strength, phase
     and line width as a function of time delay
 
     Parameters
     ----------
-    td : list
-        list of time delay values
-    params : np.array
-        dimensions (number of time delays, 4)
-        the four fit parameters for each time delay.
-        params[:, 0] is the line strength
-        params[:, 1] is the phase
-        params[:, 2] is the line width
-        params[:, 3] is the background term
-    errors : np.array
-        fitting errors corresponding to the params array
+    params : pd.DataFrame
+        Fit parameters and fitting errors for each time delay
 
     Returns
     -------
@@ -198,22 +190,26 @@ def plotParams(td, params, errors):
     """
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-    ax1.plot(td, params[:, 0])
-    ax1.fill_between(td, params[:, 0]+errors[:, 0],
-                     params[:, 0]-errors[:, 0],  facecolor="gray", alpha=0.35)
-    ax1.set_title('Line strength')
+    axs = {
+        'Line Strength': ax1,
+        'Phase': ax2,
+        'Line Width': ax3
+    }
+    units = {
+        'Line Strength': '',
+        'Phase': '(rad)',
+        'Line Width': '(eV)'
+    }
+    for parameter in axs:
+        axs[parameter].plot(params['Time Delays'], params[parameter])
+        axs[parameter].fill_between(
+            params['Time Delays'],
+            params[parameter] + params[f'{parameter} Error'],
+            params[parameter] - params[f'{parameter} Error'],
+            facecolor="gray", alpha=0.35)
+        axs[parameter].set_title(units[parameter])
 
-    ax2.plot(td, params[:, 1])
-    ax2.fill_between(td, params[:, 1]+errors[:, 1],
-                     params[:, 1]-errors[:, 1],  facecolor="gray", alpha=0.35)
-    ax2.set_title('Phase (rad)')
     ax2.set_xlabel('Time delay (fs)')
-
-    ax3.plot(td, params[:, 2])
-    ax3.fill_between(td, params[:, 2]+errors[:, 2],
-                     params[:, 2]-errors[:, 2],  facecolor="gray", alpha=0.35)
-
-    ax3.set_title('Line width (eV)')
 
     return fig
 
@@ -227,13 +223,8 @@ def getODfit(OD_sim, params):
     OD_sim : OpticalDensity
         dataframe containing the optical density computed at each time delay.
 
-    params : np.array
-        dimensions (number of time delays, 4)
-        the four fit parameters for each time delay.
-        params[:, 0] is the line strength
-        params[:, 1] is the phase
-        params[:, 2] is the line width
-        params[:, 3] is the background term
+    params : pd.DataFrame
+        Fit parameters and fitting errors for each time delay
 
     Returns
     -------
@@ -242,11 +233,16 @@ def getODfit(OD_sim, params):
         energy for each time-delay
     """
     OD_fit = {}
-    for col, popt in zip(OD_sim.columns, params):
+    for col in OD_sim.columns:
+        row = params.loc[params['Time Delays'] == -float(col)]
+        popt = [row['Line Strength'].values, row['Phase'],
+                row['Line Width'], row['Background']]
+        popt = np.reshape(popt, (4,))
         OD_fit[col] = hf.fit_lineshapes(OD_sim.energies, *popt)
 
     OD_fit = OpticalDensity(OD_fit)
     OD_fit.energies = OD_sim.energies
+    OD_fit.timedelays = OD_sim.timedelays
     return(OD_fit)
 
 
@@ -294,7 +290,7 @@ def plotOD(OD_sim, OD_fit):
     return(ax)
 
 
-def outputData(OD_fit, OD_sim, params, errors):
+def outputData(OD_fit, OD_sim, params):
     """
     Write the simulated and fitted optical densities to file, as well as the
     fitting parameters.
@@ -305,15 +301,8 @@ def outputData(OD_fit, OD_sim, params, errors):
         dataframe containing the optical density computed at each time delay.
     OD_fit : OpticalDensity
         dataframe containing the reconstructed optical density as a function of
-    params : np.array
-        dimensions (number of time delays, 4)
-        the four fit parameters for each time delay.
-        params[:, 0] is the line strength
-        params[:, 1] is the phase
-        params[:, 2] is the line width
-        params[:, 3] is the background term
-    errors : np.array
-        fitting errors corresponding to the params array
+    params : pd.DataFrame
+        Fit parameters and fitting errors for each time delay
     """
     OD_sim.insert(loc=0, column='Energy', value=OD_sim.energies)
     OD_sim.to_csv(f'OD{OD_sim.intensity}.csv', index=False)
@@ -321,26 +310,17 @@ def outputData(OD_fit, OD_sim, params, errors):
     OD_fit.insert(loc=0, column='Energy', value=OD_sim.energies)
     OD_fit.to_csv(f'OD_fit{OD_sim.intensity}.csv', index=False)
 
-    params_df = pd.DataFrame()
-    params_df['Time Delays'] = OD_sim.timedelays
-    params_df['Line Strength'] = params[:, 0]
-    params_df['Phase'] = params[:, 1]
-    params_df['Line Width'] = params[:, 2]
-    params_df['Line Strength Error'] = errors[:, 0]
-    params_df['Phase Error'] = errors[:, 1]
-    params_df['Line Width Error'] = errors[:, 2]
-
-    params_df.to_csv(f'fit_params{OD_sim.intensity}.csv', index=False)
+    params.to_csv(f'fit_params{OD_sim.intensity}.csv', index=False)
 
 
 OD_sim = getOD(intensity)
-params, errors = fitOD(OD_sim)
+params = fitOD(OD_sim)
 
 OD_fit = getODfit(OD_sim, params)
 
-plotParams(OD_sim.timedelays, params, errors)
+plotParams(params)
 plotOD(OD_sim, OD_fit)
 
 plt.show()
 
-outputData(OD_fit, OD_sim, params, errors)
+outputData(OD_fit, OD_sim, params)
