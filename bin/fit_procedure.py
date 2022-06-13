@@ -16,8 +16,6 @@ Where the argument -i chooses the IR intensity.
 Adapted from a script by Max.
 """
 import numpy as np
-from scipy.optimize import curve_fit
-from scipy.constants import physical_constants as constants
 import pandas as pd
 import matplotlib.pyplot as plt
 import helper_functions as hf
@@ -25,29 +23,46 @@ import warnings
 warnings.filterwarnings("ignore")
 
 args = hf.read_command_line()
-
+energy_shift = args['energy_shift']
+roi = args['roi']
 intensity = args["IR_intensity"]
-
-gamma_xe1 = 0.122  # linewidth from literature (Anderson 2001)
-alpha = constants['fine-structure constant'][0]
-
-# roi == region of interest
-roi = slice(*hf.get_roi(hf.get_energy_axis(), erange=(60, 62)))
+literature_linewidth = 0.122  # eV linewidth from literature (Anderson 2001)
 
 
 class OpticalDensity(pd.DataFrame):
     """
     Class for holding the optical density data. The data is held in a pandas
-    DataFrame, but the class provides three additional attributes, for the laser
-    intensity, the photon energy axis and the time delays (which are held inthe
-    column headings, but converted to floats)
+    DataFrame, but the class provides three additional attributes, for the
+    laser intensity, the photon energy axis and the time delays (which are held
+    in the column headings, but converted to floats)
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.intensity = intensity
         self.energies = None
         self.timedelays = [-float(delay) for delay in self.columns]
+
+
+def AugerDecayFactor(time_in_au, t_zero=904.1058):
+    """
+    Prepare the exponential decay factor to simulate Auger decay in the
+    simulated dipole. The decay factor is exp(-t/gamma) where gamma is the
+    line width.
+    Parameters
+    ----------
+    time_in_au : list-like
+        array of times at which the dipole has been evaluated in atomic units.
+    t_zero : float
+        the time at which to start the exponential decay which is the end of
+        the XUV pulse: 1 FWHM after the peak of the XUV.
+    """
+    time = time_in_au - t_zero
+    lifetime = 1/(hf.ev_to_au(literature_linewidth)/2)
+    decay = np.exp(- time/lifetime)
+    decay[time < 0] = 1
+    return decay
 
 
 def getOD(intensity):
@@ -67,25 +82,25 @@ def getOD(intensity):
     OD_sim : OpticalDensity
         dataframe containing the optical density computed at each time delay.
     """
+    from scipy.constants import physical_constants
+    alpha = physical_constants['fine-structure constant'][0]
 
     df1 = pd.read_csv(f"dipole{intensity}.csv")
     df2 = pd.read_csv(f"field{intensity}.csv")
 
-# -----------------------------------------------------------------------
-#                   Delay loop
-# -----------------------------------------------------------------------
 
 # prepad signal with zeros to improve resolution
     file_length = len(df1)
-    slen = 2**21
-    nzero = slen - file_length
-# prepare the exponential decay factor
-# t_zero is 1 FWHM after the peak of the XUV.
-    t_zero = 21.87
-    time = hf.au_to_fs(df1['Time']) - t_zero
-    lifetime = hf.au_to_fs(1/(hf.ev_to_au(gamma_xe1)/2))
-    decay = np.exp(- time/lifetime)
-    decay[time < 0] = 1
+    desired_length = 2**21
+    num_zeros_to_pad = desired_length - file_length
+
+    decay = AugerDecayFactor(df1['Time'])
+
+    dt = df1['Time'][1] - df1['Time'][0]
+    w = np.fft.fftfreq(desired_length, dt/(2*np.pi))
+    w_ev = hf.au_to_ev(w)
+    w_roi = w_ev[np.all([(w_ev > roi[0]), (w_ev < roi[1])], axis=0)]
+
     OD_sim = {}  # for performance: build dict and then convert to dataframe
 
     for delay in df1.columns.values[1:]:
@@ -93,25 +108,20 @@ def getOD(intensity):
         xuv_dipole = decay * df1[delay]
 
         # prepad to improve FT resolution
-        field = np.pad(efield, (nzero, 0), 'constant', constant_values=(0, 0))
-        dipole = np.pad(xuv_dipole, (nzero, 0), 'constant',
-                        constant_values=(0, 0))
+        field = np.pad(efield, (num_zeros_to_pad, 0),
+                       'constant', constant_values=(0, 0))
+        dipole = np.pad(xuv_dipole, (num_zeros_to_pad, 0),
+                        'constant', constant_values=(0, 0))
 
-        # FT to frequency domain
         dw = np.fft.fft(dipole)
         ew = np.fft.fft(field)
-
-        dt = time[1] - time[0]
-        w = np.fft.fftfreq(field.shape[0], hf.fs_to_au(dt)/(2*np.pi))
-        w_ev = hf.au_to_ev(w)
-        w_roi = w_ev[np.all([(w_ev > 59), (w_ev < 62)], axis=0)]
-
         OD = -4*np.pi*alpha*w*np.imag(dw/ew)
-        OD_roi = OD[np.all([(w_ev > 59), (w_ev < 62)], axis=0)]
+
+        OD_roi = OD[np.all([(w_ev > roi[0]), (w_ev < roi[1])], axis=0)]
         OD_sim[delay] = OD_roi
 
     OD_sim = OpticalDensity(OD_sim)
-    OD_sim.energies = w_roi
+    OD_sim.energies = w_roi + energy_shift
 
     return OD_sim
 
@@ -132,18 +142,17 @@ def fitOD(OD_sim):
     params : pd.DataFrame
         Fit parameters and fitting errors for each time delay
     """
-# -----------------------------------------------------------------------
-#                   Fit setup
-# -----------------------------------------------------------------------
+    from scipy.optimize import curve_fit
+
 # fit parameters:[line_strength, phase, line_width, constant_background_term)
 #              [  z0,   ϕ,     Γ,             c]
-    lower_bounds = [1e-6,  -np.pi, 0.5*gamma_xe1, -1]
-    upper_bounds = [np.inf, np.pi, 2*gamma_xe1, 1]
+    lower_bounds = [1e-6,  -np.pi, 0.5*literature_linewidth, -1]
+    upper_bounds = [np.inf, np.pi, 2*literature_linewidth, 1]
     bounds = (lower_bounds, upper_bounds)
 
 # Initial guess for fitting parameters
 #                [z0, ϕ,   Γ,       c]
-    p_init = np.array([1, 0, gamma_xe1, 0])
+    p_init = np.array([1, 0, literature_linewidth, 0])
     params = []
     errors = []
 
@@ -207,7 +216,7 @@ def plotParams(params):
             params[parameter] + params[f'{parameter} Error'],
             params[parameter] - params[f'{parameter} Error'],
             facecolor="gray", alpha=0.35)
-        axs[parameter].set_title(units[parameter])
+        axs[parameter].set_title(f'{parameter} {units[parameter]}')
 
     ax2.set_xlabel('Time delay (fs)')
 
@@ -241,7 +250,7 @@ def getODfit(OD_sim, params):
         OD_fit[col] = hf.fit_lineshapes(OD_sim.energies, *popt)
 
     OD_fit = OpticalDensity(OD_fit)
-    OD_fit.energies = OD_sim.energies
+    OD_fit.energies = OD_sim.energies 
     OD_fit.timedelays = OD_sim.timedelays
     return(OD_fit)
 
@@ -269,11 +278,11 @@ def plotOD(OD_sim, OD_fit):
     fig, ax = plt.subplots(nrows=1, ncols=2, num=5)
     fig.subplots_adjust(right=0.9, left=0.1, top=0.9, bottom=0.15, wspace=0.2)
 
-    im = ax[0].pcolor(OD_sim.energies-5.5, OD_sim.timedelays, OD_sim.transpose(),
-                      **paramdict, vmin=-0.04, vmax=0.25)
+    im = ax[0].pcolor(OD_sim.energies, OD_sim.timedelays,
+                      OD_sim.transpose(), **paramdict, vmin=-0.04, vmax=0.25)
     vmin, vmax = im.get_clim()
-    im2 = ax[1].pcolor(OD_sim.energies-5.5, OD_fit.timedelays, OD_fit.transpose(),
-                       **paramdict, vmin=vmin, vmax=vmax)
+    im2 = ax[1].pcolor(OD_sim.energies, OD_fit.timedelays,
+                       OD_fit.transpose(), **paramdict, vmin=vmin, vmax=vmax)
 
     cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.75])
     cbar = fig.colorbar(im2, cax=cbar_ax)
