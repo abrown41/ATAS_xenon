@@ -327,9 +327,11 @@ params = fitOD(OD_sim)
 
 OD_fit = getODfit(OD_sim, params)
 
-plotParams(params)
-plotOD(OD_sim, OD_fit)
+if args['plot']:
+    plotParams(params)
+    plotOD(OD_sim, OD_fit)
 
-plt.show()
+    plt.show()
 
-outputData(OD_fit, OD_sim, params)
+if args['output']:
+    outputData(OD_fit, OD_sim, params)

@@ -232,7 +232,7 @@ def read_command_line():
     parser.add_argument('-p', '--plot', help="show the plotted data",
                         action='store_true', default=False)
     parser.add_argument('-o', '--output', help="save data to file",
-                        action='store_true', default=True)
+                        action='store_true', default=False)
     parser.add_argument('-i', '--IR_intensity',
                         type=float, help="IR intensity")
     parser.add_argument('--energy_shift',
@@ -244,6 +244,8 @@ def read_command_line():
 
     args = vars(parser.parse_args())
 
+    if not args['plot']:
+        args['output'] = True
     e_res = args['e_res']
     roi_lo = min(e_res) - 1.5
     roi_hi = max(e_res) + 1.5
