@@ -20,6 +20,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import helper_functions as hf
 import warnings
+
 warnings.filterwarnings("ignore")
 
 args = hf.read_command_line()
@@ -125,6 +126,17 @@ def getOD(intensity):
 
     return OD_sim
 
+def readOD(fname):
+    """
+    read the OD from fname and store it in OpticalDensity format
+    """
+
+    OD_sim = pd.read_csv(fname)
+    energies = OD_sim['Energy']
+    OD_sim.drop("Energy", axis=1, inplace=True)
+    OD_sim = OpticalDensity(OD_sim)
+    OD_sim.energies = energies
+    return OD_sim
 
 def fitOD(OD_sim):
     """
@@ -181,6 +193,12 @@ def fitOD(OD_sim):
     params_df['Line Width Error'] = errors[:, 2]
 
     return params_df
+
+
+def readParams(fname):
+    """given the csv file containing the fit parameters, read them from file and
+    return the DataFrame"""
+    return pd.read_csv(fname)
 
 
 def plotParams(params):
@@ -322,10 +340,40 @@ def outputData(OD_fit, OD_sim, params):
     params.to_csv(f'fit_params{OD_sim.intensity}.csv', index=False)
 
 
-OD_sim = getOD(intensity)
-params = fitOD(OD_sim)
+def calc_or_read(fname, readRoutine, calcRoutine, **kwargs):
+    """ Decide whether to recalculate a particular data structure using
+    calcRoutine, or read the pre-calculated data from file, based on user
+    input.
+    """
+    from os.path import isfile
 
-OD_fit = getODfit(OD_sim, params)
+    read_from_file = "n"
+
+    if isfile(fname):
+        read_from_file = input(f"file {fname} already exists: do you want \
+to read data from file? y/n: ")
+
+    if read_from_file == "n":
+        data = calcRoutine(**kwargs)
+    else:
+        data = readRoutine(fname)
+    return data
+
+
+def getAllData(intensity):
+    OD_sim = calc_or_read(f"OD{intensity}.csv", readRoutine=readOD,
+                          calcRoutine=getOD, intensity=intensity)
+
+    params = calc_or_read(f"fit_params{intensity}.csv", readRoutine=readParams,
+                          calcRoutine=fitOD, OD_sim=OD_sim)
+
+    OD_fit = calc_or_read(f"OD_fit{intensity}.csv", readRoutine=readOD,
+                          calcRoutine=getODfit, OD_sim=OD_sim, params=params)
+
+    return OD_sim, OD_fit, params
+
+
+OD_sim, OD_fit, params = getAllData(intensity)
 
 if args['plot']:
     plotParams(params)
