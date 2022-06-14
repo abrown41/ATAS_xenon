@@ -43,7 +43,7 @@ class OpticalDensity(pd.DataFrame):
 
         self.intensity = intensity
         self.energies = None
-        self.timedelays = [-float(delay) for delay in self.columns]
+        self.timedelays = [float(delay) for delay in self.columns]
 
 
 def AugerDecayFactor(time_in_au, t_zero=904.1058):
@@ -261,7 +261,7 @@ def getODfit(OD_sim, params):
     """
     OD_fit = {}
     for col in OD_sim.columns:
-        row = params.loc[params['Time Delays'] == -float(col)]
+        row = params.loc[params['Time Delays'] == float(col)]
         popt = [row['Line Strength'].values, row['Phase'],
                 row['Line Width'], row['Background']]
         popt = np.reshape(popt, (4,))
