@@ -20,36 +20,21 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import helper_functions as hf
 import warnings
+
 warnings.filterwarnings("ignore")
 
 args = hf.read_command_line()
 energy_shift = args['energy_shift']
-roi = args['roi']
 intensity = args["IR_intensity"]
 literature_linewidth = 0.122  # eV linewidth from literature (Anderson 2001)
-
-
-class OpticalDensity(pd.DataFrame):
-    """
-    Class for holding the optical density data. The data is held in a pandas
-    DataFrame, but the class provides three additional attributes, for the
-    laser intensity, the photon energy axis and the time delays (which are held
-    in the column headings, but converted to floats)
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.intensity = intensity
-        self.energies = None
-        self.timedelays = [-float(delay) for delay in self.columns]
 
 
 def AugerDecayFactor(time_in_au, t_zero=904.1058):
     """
     Prepare the exponential decay factor to simulate Auger decay in the
-    simulated dipole. The decay factor is exp(-t/gamma) where gamma is the
-    line width.
+    simulated dipole. The decay factor is exp(-t/lifetime) where liftime is the
+    life time of the resonance (computed from the linewidth
+
     Parameters
     ----------
     time_in_au : list-like
@@ -79,11 +64,12 @@ def getOD(intensity):
 
     Returns
     -------
-    OD_sim : OpticalDensity
+    OD_sim : pd.DataFrame
         dataframe containing the optical density computed at each time delay.
     """
     from scipy.constants import physical_constants
     alpha = physical_constants['fine-structure constant'][0]
+    roi = args['roi']
 
     df1 = pd.read_csv(f"dipole{intensity}.csv")
     df2 = pd.read_csv(f"field{intensity}.csv")
@@ -120,10 +106,23 @@ def getOD(intensity):
         OD_roi = OD[np.all([(w_ev > roi[0]), (w_ev < roi[1])], axis=0)]
         OD_sim[delay] = OD_roi
 
-    OD_sim = OpticalDensity(OD_sim)
-    OD_sim.energies = w_roi + energy_shift
+    OD_sim = pd.DataFrame(OD_sim)
+    OD_sim['Energy'] = w_roi + energy_shift
+    OD_sim.set_index("Energy", inplace=True)
 
     return OD_sim
+
+
+def readcsv(fname):
+    """
+    read the data from csv file 'fname', index it correctly based on the
+    filename format
+    """
+    data = pd.read_csv(fname)
+    if fname.startswith('OD'):
+        data.set_index('Energy', inplace=True)
+    data.overwrite = False
+    return data
 
 
 def fitOD(OD_sim):
@@ -134,7 +133,7 @@ def fitOD(OD_sim):
 
     Parameters
     ----------
-    OD_sim : OpticalDensity
+    OD_sim : pd.DataFrame
         dataframe containing the optical density computed at each time delay.
 
     Returns
@@ -161,7 +160,7 @@ def fitOD(OD_sim):
         p_init[:-1:3] = abs(p_init[:-1:3])
         p_init[2:-1:3] = abs(p_init[2:-1:3])
 
-        popt, pcov = curve_fit(hf.fit_lineshapes, OD_sim.energies,
+        popt, pcov = curve_fit(hf.fit_lineshapes, OD_sim.index.values,
                                OD_sim[delay], p_init, maxfev=1000000,
                                bounds=bounds)
 
@@ -171,7 +170,7 @@ def fitOD(OD_sim):
     params = np.array(params)
     errors = np.array(errors)
     params_df = pd.DataFrame()
-    params_df['Time Delays'] = OD_sim.timedelays
+    params_df['Time Delays'] = [float(time) for time in OD_sim.columns]
     params_df['Line Strength'] = params[:, 0]
     params_df['Phase'] = params[:, 1]
     params_df['Line Width'] = params[:, 2]
@@ -180,6 +179,7 @@ def fitOD(OD_sim):
     params_df['Phase Error'] = errors[:, 1]
     params_df['Line Width Error'] = errors[:, 2]
 
+    params_df.sort_values(by=['Time Delays'], inplace=True)
     return params_df
 
 
@@ -229,7 +229,7 @@ def getODfit(OD_sim, params):
 
     Parameters
     ----------
-    OD_sim : OpticalDensity
+    OD_sim : pd.DataFrame
         dataframe containing the optical density computed at each time delay.
 
     params : pd.DataFrame
@@ -237,21 +237,19 @@ def getODfit(OD_sim, params):
 
     Returns
     -------
-    OD_fit : OpticalDensity
+    OD_fit : pd.DataFrame
         dataframe containing the reconstructed optical density as a function of
         energy for each time-delay
     """
     OD_fit = {}
     for col in OD_sim.columns:
-        row = params.loc[params['Time Delays'] == -float(col)]
+        row = params.loc[params['Time Delays'] == float(col)]
         popt = [row['Line Strength'].values, row['Phase'],
                 row['Line Width'], row['Background']]
         popt = np.reshape(popt, (4,))
-        OD_fit[col] = hf.fit_lineshapes(OD_sim.energies, *popt)
+        OD_fit[col] = hf.fit_lineshapes(OD_sim.index.values, *popt)
 
-    OD_fit = OpticalDensity(OD_fit)
-    OD_fit.energies = OD_sim.energies 
-    OD_fit.timedelays = OD_sim.timedelays
+    OD_fit = pd.DataFrame(OD_fit, index=OD_sim.index)
     return(OD_fit)
 
 
@@ -263,9 +261,9 @@ def plotOD(OD_sim, OD_fit):
 
     Parameters
     ----------
-    OD_sim : OpticalDensity
+    OD_sim : pd.DataFrame
         dataframe containing the optical density computed at each time delay.
-    OD_fit : OpticalDensity
+    OD_fit : pd.DataFrame
         dataframe containing the reconstructed optical density as a function of
 
     Returns
@@ -278,10 +276,10 @@ def plotOD(OD_sim, OD_fit):
     fig, ax = plt.subplots(nrows=1, ncols=2, num=5)
     fig.subplots_adjust(right=0.9, left=0.1, top=0.9, bottom=0.15, wspace=0.2)
 
-    im = ax[0].pcolor(OD_sim.energies, OD_sim.timedelays,
+    im = ax[0].pcolor(OD_sim.index.values, [float(x) for x in OD_sim.columns],
                       OD_sim.transpose(), **paramdict, vmin=-0.04, vmax=0.25)
     vmin, vmax = im.get_clim()
-    im2 = ax[1].pcolor(OD_sim.energies, OD_fit.timedelays,
+    im2 = ax[1].pcolor(OD_sim.index.values, [float(x) for x in OD_fit.columns],
                        OD_fit.transpose(), **paramdict, vmin=vmin, vmax=vmax)
 
     cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.75])
@@ -306,26 +304,69 @@ def outputData(OD_fit, OD_sim, params):
 
     Parameters
     ----------
-    OD_sim : OpticalDensity
+    OD_sim : pd.DataFrame
         dataframe containing the optical density computed at each time delay.
-    OD_fit : OpticalDensity
+    OD_fit : pd.DataFrame
         dataframe containing the reconstructed optical density as a function of
     params : pd.DataFrame
         Fit parameters and fitting errors for each time delay
     """
-    OD_sim.insert(loc=0, column='Energy', value=OD_sim.energies)
-    OD_sim.to_csv(f'OD{OD_sim.intensity}.csv', index=False)
+    if OD_sim.overwrite:
+        OD_sim.to_csv(f'OD{intensity}.csv', index=True)
 
-    OD_fit.insert(loc=0, column='Energy', value=OD_sim.energies)
-    OD_fit.to_csv(f'OD_fit{OD_sim.intensity}.csv', index=False)
+    if OD_fit.overwrite:
+        OD_fit.to_csv(f'OD_fit{intensity}.csv', index=True)
 
-    params.to_csv(f'fit_params{OD_sim.intensity}.csv', index=False)
+    if params.overwrite:
+        params.to_csv(f'fit_params{intensity}.csv', index=False)
 
 
-OD_sim = getOD(intensity)
-params = fitOD(OD_sim)
+def calc_or_read(fname, calcRoutine, **kwargs):
+    """ Decide whether to recalculate a particular data structure using
+    calcRoutine, or read the pre-calculated data from file, based on user
+    input.
+    """
+    from os.path import isfile
 
-OD_fit = getODfit(OD_sim, params)
+    read_from_file = "n"
+
+    if isfile(fname):
+        if args['read_all']:
+            read_from_file = 'y'
+        else:
+            read_from_file = input(f"File {fname} already exists: do you want \
+to read data from file? y/n: ")
+
+    if read_from_file == "n":
+        data = calcRoutine(**kwargs)
+    else:
+        data = readcsv(fname)
+    
+    data.overwrite = (read_from_file == 'n')
+    return data
+
+
+def getAllData(intensity):
+    """compute, or read from file, the optical density, the fit parameters and
+    the fitted optical density"""
+    from os.path import isfile
+
+    if not isfile(f'dipole{intensity}.csv'):
+        OD_sim = readcsv(f'OD{intensity}.csv')
+    else:
+        OD_sim = calc_or_read(f"OD{intensity}.csv", calcRoutine=getOD,
+                              intensity=intensity)
+
+    params = calc_or_read(f"fit_params{intensity}.csv", calcRoutine=fitOD,
+                          OD_sim=OD_sim)
+
+    OD_fit = calc_or_read(f"OD_fit{intensity}.csv", calcRoutine=getODfit,
+                          OD_sim=OD_sim, params=params)
+
+    return OD_sim, OD_fit, params
+
+
+OD_sim, OD_fit, params = getAllData(intensity)
 
 if args['plot']:
     plotParams(params)
