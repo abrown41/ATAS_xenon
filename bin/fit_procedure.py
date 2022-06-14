@@ -121,6 +121,7 @@ def readcsv(fname):
     data = pd.read_csv(fname)
     if fname.startswith('OD'):
         data.set_index('Energy', inplace=True)
+    data.overwrite = False
     return data
 
 
@@ -310,11 +311,14 @@ def outputData(OD_fit, OD_sim, params):
     params : pd.DataFrame
         Fit parameters and fitting errors for each time delay
     """
-    OD_sim.to_csv(f'OD{intensity}.csv', index=True)
+    if OD_sim.overwrite:
+        OD_sim.to_csv(f'OD{intensity}.csv', index=True)
 
-    OD_fit.to_csv(f'OD_fit{intensity}.csv', index=True)
+    if OD_fit.overwrite:
+        OD_fit.to_csv(f'OD_fit{intensity}.csv', index=True)
 
-    params.to_csv(f'fit_params{intensity}.csv', index=False)
+    if params.overwrite:
+        params.to_csv(f'fit_params{intensity}.csv', index=False)
 
 
 def calc_or_read(fname, calcRoutine, **kwargs):
@@ -337,15 +341,21 @@ to read data from file? y/n: ")
         data = calcRoutine(**kwargs)
     else:
         data = readcsv(fname)
+    
+    data.overwrite = (read_from_file == 'n')
     return data
 
 
 def getAllData(intensity):
     """compute, or read from file, the optical density, the fit parameters and
     the fitted optical density"""
+    from os.path import isfile
 
-    OD_sim = calc_or_read(f"OD{intensity}.csv", calcRoutine=getOD,
-                          intensity=intensity)
+    if not isfile(f'dipole{intensity}.csv'):
+        OD_sim = readcsv(f'OD{intensity}.csv')
+    else:
+        OD_sim = calc_or_read(f"OD{intensity}.csv", calcRoutine=getOD,
+                              intensity=intensity)
 
     params = calc_or_read(f"fit_params{intensity}.csv", calcRoutine=fitOD,
                           OD_sim=OD_sim)
