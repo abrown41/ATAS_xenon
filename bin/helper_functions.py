@@ -25,14 +25,8 @@ from argparse import ArgumentParser as AP
 pldp_au = 0.77              # path-length-density-product in atomic units
 alpha = cnt.constants.fine_structure
 lineshape_constant = pldp_au/np.log(10)*4*np.pi*alpha
-
-# resonance energies after calibration
-
-# (retrieved by fitting a Lorentzian to the spectra far out of temporal overlap)
-
-# -----------------------------------------------------------------------
-#                   Functions
-# -----------------------------------------------------------------------
+e_res = [55.38]  # resonance energy (eV)
+energy_shift = -5.5  # energy shift (eV) to match RMT result with experiment
 
 
 def au_to_fs(time_in_au):
@@ -143,7 +137,7 @@ def DCM_lineshape(energy_axis, z, phi, resonance_energy, gamma):
     ----------
 
     energy_axis : the array of values that defines the photon energy axis
-
+)
     z : line strength
 
     phi : dipole phase
@@ -204,8 +198,6 @@ def fit_lineshapes(energy_axis, *params):
         offset to fit the non-resonant background.
 
     """
-    global e_res
-
     model = np.zeros(energy_axis.shape)
 
     z = params[:-1:3]
@@ -227,7 +219,6 @@ def fit_lineshapes(energy_axis, *params):
 
 
 def read_command_line():
-    global e_res
     parser = AP()
     parser.add_argument('-p', '--plot', help="show the plotted data",
                         action='store_true', default=False)
@@ -235,12 +226,6 @@ def read_command_line():
                         action='store_true', default=False)
     parser.add_argument('-i', '--IR_intensity',
                         type=float, help="IR intensity")
-    parser.add_argument('--energy_shift',
-                        help="energy in eV by which to shift the energy axis",
-                        type=float, default=-5.5)
-    parser.add_argument('--e_res',
-                        help="positions of resonances in eV (before shift)",
-                        type=list, default=[60.88])
     parser.add_argument('-r', '--read_all',
                         help="read all data from file rather than recalculate",
                         action='store_true', default=False)
@@ -249,11 +234,10 @@ def read_command_line():
 
     if not args['plot']:
         args['output'] = True
-    e_res = args['e_res']
-    roi_lo = min(e_res) - 1.5
-    roi_hi = max(e_res) + 1.5
+    roi_lo = e_res[0] - energy_shift - 1.5
+    roi_hi = e_res[0] - energy_shift + 1.5
     args['roi'] = [roi_lo, roi_hi]
-    e_res = [e + args['energy_shift'] for e in e_res]
+    args['energy_shift'] = energy_shift
     return args
 
 
