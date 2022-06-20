@@ -220,6 +220,12 @@ def plotParams(params):
 
     ax2.set_xlabel('Time delay (fs)')
 
+    ax1.set_xlim([-5,6])
+    ax1.set_ylim([-0.01,0.22])
+    ax2.set_xlim([-5,6])
+    ax2.set_ylim([-2.25,1])
+    ax3.set_xlim([-5,6])
+    ax3.set_ylim([0.09,0.33])
     return fig
 
 
