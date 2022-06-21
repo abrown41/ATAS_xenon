@@ -25,7 +25,7 @@ from argparse import ArgumentParser as AP
 pldp_au = 0.77              # path-length-density-product in atomic units
 alpha = cnt.constants.fine_structure
 lineshape_constant = pldp_au/np.log(10)*4*np.pi*alpha
-e_res = [55.38]  # resonance energy (eV)
+e_res = [55.38, 55.98, 57.30] # resonance energy (eV)
 energy_shift = -5.5  # energy shift (eV) to match RMT result with experiment
 
 
@@ -206,7 +206,8 @@ def fit_lineshapes(energy_axis, *params):
 
     gamma = params[2:-1:3]
 
-    for e, energy in enumerate(e_res):
+    # for e, energy in enumerate(e_res):
+    for e, energy in reversed(list(enumerate(e_res))):
 
         model += DCM_lineshape(energy_axis,
                                z[e]*gamma[e], phi[e], energy, gamma[e])
